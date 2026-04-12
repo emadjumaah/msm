@@ -9,7 +9,7 @@ Each model masters one task. Together they deliver results that match or exceed 
 ```
 User Input (any language)
        ↓
-  [L1] Translation        → English text + cultural context annotations
+  [L1] Translation        → English text (skipped if input is already English)
        ↓
   [L2] Classification     → Intent + Domain + Urgency
        ↓
@@ -21,10 +21,25 @@ User Input (any language)
        ↓
   [L6] Validation         → Quality Gate (release / block / retry)
        ↓
-  Final Output
+  Final Output (translated back if needed)
 ```
 
-## Why MSM?
+## Why MSM — and not LangChain / LlamaIndex?
+
+LangChain and LlamaIndex are **orchestration libraries** — they help you call one large model in flexible ways. MSM is a **pipeline standard** — it replaces the one large model with six small specialized ones.
+
+| | LangChain / LlamaIndex | MSM |
+| --- | --- | --- |
+| Core idea | Orchestrate one LLM | Replace LLM with specialized pipeline |
+| Model coupling | Tied to provider APIs | Any model behind a standard contract |
+| Swap a model | Change code + prompts | Change one line in manifest YAML |
+| Language support | Depends on the LLM | Dedicated Translation Layer (any language) |
+| Auditability | Prompt chains | Per-layer trace with confidence scores |
+| Cost | LLM pricing | 10-20x cheaper (small models) |
+
+If your problem is "I need GPT-4 to do X" → use LangChain. If your problem is "I need a production AI system that's cheap, fast, auditable, and works in Arabic" → use MSM.
+
+## Cost Comparison
 
 |                   | LLM Approach       | MSM Approach                       |
 | ----------------- | ------------------ | ---------------------------------- |
@@ -48,6 +63,8 @@ cd msm
 pnpm install
 pnpm demo          # runs with dummy models — zero setup
 ```
+
+> **Note:** MSM is not yet published to npm. For now, clone the repo and import from source. `npm publish` is on the [roadmap](#roadmap).
 
 ### Option B: Run with real AI models (Ollama)
 
@@ -113,7 +130,7 @@ layers:
     provider: ollama # ← which implementation to use
     model: "qwen2.5:3b" # ← which model
     version: "1.0.0"
-    mode: "translated"
+    mode: "translated"     # "translated" = translate non-English, "native" = English passthrough
 
   classification:
     provider: ollama
@@ -403,7 +420,29 @@ MSM_PORT=8080 pnpm server                            # custom port
 }
 ```
 
-Response includes the final output, per-layer trace, and full payload for debugging.
+Response:
+
+```json
+{
+  "output": {
+    "text": "تم تأكيد طلبك! التوصيل خلال 30 دقيقة تقريباً.",
+    "language": "ar-gulf",
+    "total_latency_ms": 3
+  },
+  "trace_id": "9f53fe56-...",
+  "total_latency_ms": 3,
+  "layers": [
+    { "layer": "translation",    "model_id": "dummy-translation-v1",    "latency_ms": 0, "status": "ok" },
+    { "layer": "classification",  "model_id": "dummy-classification-v1",  "latency_ms": 0, "status": "ok" },
+    { "layer": "orchestration",   "model_id": "dummy-orchestration-v1",   "latency_ms": 0, "status": "ok" },
+    { "layer": "execution",       "model_id": "dummy-execution-v1",       "latency_ms": 0, "status": "ok" },
+    { "layer": "generation",      "model_id": "dummy-generation-v1",      "latency_ms": 0, "status": "ok" },
+    { "layer": "validation",      "model_id": "dummy-validation-v1",      "latency_ms": 0, "status": "ok" }
+  ]
+}
+```
+
+The full `payload` object (with all layer outputs, context annotations, and hook results) is also included for debugging.
 
 ### `GET /api/health`
 
@@ -541,6 +580,10 @@ MSM:  specialization solves real problems
 LLM:  black box, hope it works
 MSM:  modular, measurable, replaceable
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on adding providers, domain manifests, hooks, and layers.
 
 ## License
 

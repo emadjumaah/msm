@@ -1,3 +1,6 @@
+# STATUS: Blueprint only. Requires external model servers.
+# To run locally, change all providers to: dummy or ollama
+
 msm_version: "1.0"
 manifest_id: "sports-booking-v1"
 domain: "sports-booking"
