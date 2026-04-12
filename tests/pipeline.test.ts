@@ -13,6 +13,8 @@ import type {
   MSMPayload,
   ValidationOutput,
   GenerationOutput,
+  MSMHook,
+  HookOutput,
 } from "../src/core/types.js";
 
 function buildPipeline() {
@@ -520,5 +522,180 @@ describe("Translation Mode", () => {
     });
 
     expect(trace.payload.translation?.mode).toBe("translated");
+  });
+});
+
+// ─── Outbound Translation ────────────────────────────────────
+
+describe("Outbound Translation", () => {
+  it("translates response back for Arabic input", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({
+      raw: "ابي اطلب برغر",
+      modality: "text",
+    });
+
+    // Should have 7 entries: 6 core + 1 outbound translation
+    expect(trace.entries).toHaveLength(7);
+    expect(trace.payload.outbound_translation).toBeDefined();
+    expect(trace.payload.outbound_translation?.layer_invoked).toBe(true);
+    expect(trace.payload.outbound_translation?.target_language).toBe("ar-gulf");
+    // Outbound entry appears in trace
+    const outboundEntry = trace.entries.find(
+      (e) => e.layer === "outbound_translation",
+    );
+    expect(outboundEntry).toBeDefined();
+    expect(outboundEntry?.status).toBe("ok");
+  });
+
+  it("skips outbound translation for English input", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({
+      raw: "I want a burger",
+      modality: "text",
+    });
+
+    // Should have 6 entries: no outbound translation needed
+    expect(trace.entries).toHaveLength(6);
+    expect(trace.payload.outbound_translation).toBeUndefined();
+  });
+
+  it("final_output uses outbound translated text for Arabic", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({
+      raw: "ابي اطلب برغر",
+      modality: "text",
+    });
+
+    // Final output should be in the user's language
+    expect(trace.payload.final_output?.language).toBe("ar-gulf");
+    // Outbound translation should produce Arabic text
+    expect(trace.payload.outbound_translation?.translated_text).toBeDefined();
+  });
+});
+
+// ─── Typed Fallbacks ─────────────────────────────────────────
+
+describe("Typed Fallbacks", () => {
+  it("produces typed classification fallback when layer is missing", async () => {
+    const pipeline = new Pipeline();
+    pipeline.register(new DummyTranslationLayer());
+    // Skip classification — don't register it
+    pipeline.register(new DummyOrchestrationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    const trace = await pipeline.run({ raw: "order food", modality: "text" });
+
+    // Classification should have typed fallback fields
+    expect(trace.payload.classification?.intent).toBe("unknown");
+    expect(trace.payload.classification?.domain).toBe("general");
+    expect(trace.payload.classification?.urgency).toBe("normal");
+    expect(trace.payload.classification?.status).toBe("failed");
+  });
+
+  it("produces typed orchestration fallback when layer throws", async () => {
+    const pipeline = buildPipeline();
+    const broken: MSMLayer = {
+      name: "orchestration",
+      async process(): Promise<never> {
+        throw new Error("model crashed");
+      },
+    };
+    pipeline.swap(broken);
+
+    const trace = await pipeline.run({ raw: "order food", modality: "text" });
+
+    expect(trace.payload.orchestration?.workflow_steps).toEqual([
+      "fallback_response",
+    ]);
+    expect(trace.payload.orchestration?.tool_selections).toEqual([]);
+    expect(trace.payload.orchestration?.status).toBe("failed");
+    // Pipeline still completes
+    expect(trace.payload.final_output).toBeDefined();
+  });
+});
+
+// ─── Session History ─────────────────────────────────────────
+
+describe("Session History", () => {
+  it("passes history through to layers via input", async () => {
+    const pipeline = buildPipeline();
+    const history = [
+      { role: "user" as const, content: "What's on your menu?" },
+      {
+        role: "assistant" as const,
+        content: "We have burgers, pizza, and more.",
+      },
+    ];
+
+    const trace = await pipeline.run({
+      raw: "I'll have a burger",
+      modality: "text",
+      history,
+    });
+
+    expect(trace.payload.input.history).toHaveLength(2);
+    expect(trace.payload.input.history?.[0].role).toBe("user");
+    expect(trace.payload.input.history?.[1].role).toBe("assistant");
+  });
+});
+
+// ─── Parallel Hooks ──────────────────────────────────────────
+
+describe("Parallel Hook Execution", () => {
+  it("runs multiple hooks at the same point concurrently", async () => {
+    const pipeline = buildPipeline();
+    const executionOrder: string[] = [];
+
+    const hookA: MSMHook = {
+      name: "hook_a",
+      point: "before:classification",
+      async process(): Promise<HookOutput> {
+        executionOrder.push("a_start");
+        // Simulate async work
+        await new Promise((r) => setTimeout(r, 10));
+        executionOrder.push("a_end");
+        return {
+          model_id: "hook-a",
+          model_ver: "1.0",
+          latency_ms: 10,
+          confidence: 1,
+          status: "ok",
+          data: { source: "a" },
+        };
+      },
+    };
+
+    const hookB: MSMHook = {
+      name: "hook_b",
+      point: "before:classification",
+      async process(): Promise<HookOutput> {
+        executionOrder.push("b_start");
+        await new Promise((r) => setTimeout(r, 10));
+        executionOrder.push("b_end");
+        return {
+          model_id: "hook-b",
+          model_ver: "1.0",
+          latency_ms: 10,
+          confidence: 1,
+          status: "ok",
+          data: { source: "b" },
+        };
+      },
+    };
+
+    pipeline.addHook(hookA);
+    pipeline.addHook(hookB);
+
+    const trace = await pipeline.run({ raw: "test", modality: "text" });
+
+    // Both hooks should have run
+    expect(trace.payload.hooks?.["hook_a"]).toBeDefined();
+    expect(trace.payload.hooks?.["hook_b"]).toBeDefined();
+    // Both should start before either finishes (parallel execution)
+    expect(executionOrder[0]).toBe("a_start");
+    expect(executionOrder[1]).toBe("b_start");
   });
 });

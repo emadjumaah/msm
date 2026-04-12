@@ -149,8 +149,12 @@ describe("createPipeline", () => {
     });
 
     expect(trace.payload.final_output).toBeDefined();
-    expect(trace.entries).toHaveLength(6);
+    // 6 core layers + 1 outbound translation for Arabic input
+    expect(trace.entries).toHaveLength(7);
     expect(trace.entries.every((e) => e.status === "ok")).toBe(true);
+    // Verify outbound translation was performed
+    expect(trace.payload.outbound_translation).toBeDefined();
+    expect(trace.payload.outbound_translation?.layer_invoked).toBe(true);
   });
 
   it("builds from a manifest object", async () => {

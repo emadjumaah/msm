@@ -117,6 +117,7 @@ async function main() {
           text?: string;
           modality?: "text" | "voice" | "image";
           session_id?: string;
+          history?: Array<{ role: "user" | "assistant"; content: string }>;
         };
 
         if (!body.text) {
@@ -125,7 +126,11 @@ async function main() {
         }
 
         const trace: PipelineTrace = await pipeline.run(
-          { raw: body.text, modality: body.modality ?? "text" },
+          {
+            raw: body.text,
+            modality: body.modality ?? "text",
+            history: body.history,
+          },
           body.session_id,
         );
 

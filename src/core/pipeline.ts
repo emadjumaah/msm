@@ -6,6 +6,9 @@ import type {
   LayerName,
   LayerMeta,
   TranslationOutput,
+  ClassificationOutput,
+  OrchestrationOutput,
+  ExecutionOutput,
   GenerationOutput,
   ValidationOutput,
   FinalOutput,
@@ -47,6 +50,69 @@ export interface PipelineOptions {
 const FALLBACK_RESPONSE =
   "I'm sorry, I wasn't able to process your request. Please try again.";
 
+// ─── Typed fallbacks per layer (downstream layers get valid shapes) ───
+
+function getLayerFallback(name: LayerName, error: string): LayerMeta {
+  const base: LayerMeta = {
+    model_id: "fallback",
+    model_ver: "0.0.0",
+    latency_ms: 0,
+    confidence: 0,
+    status: "failed",
+    error,
+  };
+
+  switch (name) {
+    case "translation":
+      return {
+        ...base,
+        translated_text: null,
+        source_language: "unknown",
+        target_language: "en",
+        layer_invoked: false,
+        mode: "native",
+      } as unknown as LayerMeta;
+    case "classification":
+      return {
+        ...base,
+        intent: "unknown",
+        domain: "general",
+        urgency: "normal",
+        routing_target: "unknown_workflow",
+      } as unknown as LayerMeta;
+    case "orchestration":
+      return {
+        ...base,
+        workflow_steps: ["fallback_response"],
+        tool_selections: [],
+        estimated_steps: 1,
+        mode: "rules",
+      } as unknown as LayerMeta;
+    case "execution":
+      return {
+        ...base,
+        tool_results: [],
+        execution_status: "failed",
+        errors: [error],
+      } as unknown as LayerMeta;
+    case "generation":
+      return {
+        ...base,
+        response_text: FALLBACK_RESPONSE,
+        tone: "neutral",
+        word_count: FALLBACK_RESPONSE.split(/\s+/).length,
+      } as unknown as LayerMeta;
+    case "validation":
+      return {
+        ...base,
+        passed: true, // don't block on validation failure
+        quality_score: 0,
+        policy_violations: [],
+        action: "release",
+      } as unknown as LayerMeta;
+  }
+}
+
 // ─── Pipeline Engine ─────────────────────────────────────────
 
 export class Pipeline {
@@ -79,28 +145,43 @@ export class Pipeline {
     this.manifest = manifest;
   }
 
-  /** Run all hooks for a given point, recording results in payload and trace */
+  /** Run all hooks for a given point in parallel, recording results */
   private async runHooks(
     point: HookPoint,
     payload: MSMPayload,
     entries: TraceEntry[],
   ): Promise<void> {
     const matching = this.hooks.filter((h) => h.point === point);
-    for (const hook of matching) {
+    if (matching.length === 0) return;
+
+    // Run hooks concurrently — they are independent of each other
+    const results = await Promise.allSettled(
+      matching.map((hook) => hook.process(payload)),
+    );
+
+    for (let i = 0; i < matching.length; i++) {
+      const hook = matching[i];
+      const settled = results[i];
       let result: HookOutput;
-      try {
-        result = await hook.process(payload);
-      } catch (err) {
+
+      if (settled.status === "fulfilled") {
+        result = settled.value;
+      } else {
+        const errMsg =
+          settled.reason instanceof Error
+            ? settled.reason.message
+            : String(settled.reason);
         result = {
           model_id: "hook-error",
           model_ver: "0.0.0",
           latency_ms: 0,
           confidence: 0,
           status: "failed",
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg,
           data: {},
         };
       }
+
       // Store hook output in payload
       if (!payload.hooks) payload.hooks = {};
       payload.hooks[hook.name] = result;
@@ -150,19 +231,15 @@ export class Pipeline {
         const layer = this.layers.get(name);
 
         if (!layer) {
-          // Graceful degradation: missing layer is recorded as failed, pipeline continues
-          const fallback: LayerMeta = {
-            model_id: "missing",
-            model_ver: "0.0.0",
-            latency_ms: 0,
-            confidence: 0,
-            status: "failed",
-            error: `Layer "${name}" not registered`,
-          };
+          // Graceful degradation: typed fallback so downstream layers get valid shapes
+          const fallback = getLayerFallback(
+            name,
+            `Layer "${name}" not registered`,
+          );
           (payload as unknown as Record<string, unknown>)[name] = fallback;
           entries.push({
             layer: name,
-            model_id: "missing",
+            model_id: fallback.model_id,
             latency_ms: 0,
             confidence: 0,
             status: "failed",
@@ -171,22 +248,16 @@ export class Pipeline {
           continue;
         }
 
-        // Run before-hooks
+        // Run before-hooks (parallel)
         await this.runHooks(`before:${name}`, payload, entries);
 
         let result: LayerMeta;
         try {
           result = await layer.process(payload);
         } catch (err) {
-          // Graceful degradation: layer threw, record failure and continue
-          result = {
-            model_id: "error",
-            model_ver: "0.0.0",
-            latency_ms: 0,
-            confidence: 0,
-            status: "failed",
-            error: err instanceof Error ? err.message : String(err),
-          };
+          // Graceful degradation: typed fallback preserves downstream contracts
+          const errMsg = err instanceof Error ? err.message : String(err);
+          result = getLayerFallback(name, errMsg);
         }
 
         (payload as unknown as Record<string, unknown>)[name] = result;
@@ -200,7 +271,7 @@ export class Pipeline {
           error: result.error,
         });
 
-        // Run after-hooks
+        // Run after-hooks (parallel)
         await this.runHooks(`after:${name}`, payload, entries);
 
         // Handle validation gate
@@ -242,14 +313,76 @@ export class Pipeline {
       }
     }
 
-    // Build final output
-    const translation = payload.translation as TranslationOutput | undefined;
+    // ── Outbound Translation ─────────────────────────────────
+    // If the inbound translation was invoked (non-English input),
+    // translate the generated response back to the user's language.
+    const inbound = payload.translation as TranslationOutput | undefined;
     const generation = payload.generation as GenerationOutput | undefined;
+    const responseText = generation?.response_text ?? FALLBACK_RESPONSE;
+
+    if (inbound?.layer_invoked && inbound.source_language !== "en") {
+      const translationLayer = this.layers.get("translation");
+      if (translationLayer) {
+        // Run before:translation hooks for outbound pass
+        await this.runHooks("before:translation", payload, entries);
+
+        let outboundResult: TranslationOutput;
+        try {
+          // Create a synthetic payload for outbound translation
+          const outboundPayload: MSMPayload = {
+            ...payload,
+            input: {
+              raw: responseText,
+              modality: "text",
+              language: "en",
+            },
+          };
+          outboundResult = (await translationLayer.process(
+            outboundPayload,
+          )) as TranslationOutput;
+          // Override: mark as outbound
+          outboundResult = {
+            ...outboundResult,
+            source_language: "en",
+            target_language: inbound.source_language,
+            layer_invoked: true,
+            mode: "translated",
+          };
+        } catch (err) {
+          outboundResult = getLayerFallback(
+            "translation",
+            err instanceof Error ? err.message : String(err),
+          ) as TranslationOutput;
+        }
+
+        payload.outbound_translation = outboundResult;
+        entries.push({
+          layer: "outbound_translation",
+          model_id: outboundResult.model_id,
+          latency_ms: outboundResult.latency_ms,
+          confidence: outboundResult.confidence,
+          status: outboundResult.status,
+          error: outboundResult.error,
+        });
+
+        // Run after:translation hooks for outbound pass
+        await this.runHooks("after:translation", payload, entries);
+      }
+    }
+
+    // Build final output
     const totalLatency = Math.round(performance.now() - startTime);
+    const outbound = payload.outbound_translation;
+
+    // Use outbound translation if available, otherwise use generation directly
+    const finalText =
+      outbound?.layer_invoked && outbound.translated_text
+        ? outbound.translated_text
+        : responseText;
 
     payload.final_output = {
-      text: generation?.response_text ?? FALLBACK_RESPONSE,
-      language: translation?.source_language ?? input.language ?? "en",
+      text: finalText,
+      language: inbound?.source_language ?? input.language ?? "en",
       total_latency_ms: totalLatency,
     } satisfies FinalOutput;
 

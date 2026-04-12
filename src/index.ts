@@ -9,6 +9,7 @@ export type {
   TranslationMode,
   TranslationOutput,
   ClassificationOutput,
+  OrchestrationMode,
   OrchestrationOutput,
   ExecutionOutput,
   GenerationOutput,

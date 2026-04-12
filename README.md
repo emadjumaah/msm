@@ -21,7 +21,9 @@ User Input (any language)
        ↓
   [L6] Validation         → Quality Gate (release / block / retry)
        ↓
-  Final Output (translated back if needed)
+  [L7] Outbound Translation → User's language (auto if inbound was translated)
+       ↓
+  Final Output
 ```
 
 ## Why MSM — and not LangChain / LlamaIndex?
@@ -644,10 +646,14 @@ Results are saved to `benchmark-results.json` for programmatic use.
 
 ## Pipeline Guarantees
 
+- **Outbound translation** — non-English users automatically receive responses in their language
+- **Typed fallbacks** — if a layer fails, downstream layers get valid typed defaults (e.g. `intent: "unknown"`, `domain: "general"`), not bare error objects
 - **Graceful degradation** — if a layer or hook fails, pipeline continues with a recorded failure
 - **Validation gate** — `block` unsafe responses (fallback) or `retry` generation
-- **Full trace** — every request has per-layer model IDs, latency, confidence, and status (including hooks)
+- **Full trace** — every request has per-layer model IDs, latency, confidence, and status (including hooks and outbound translation)
 - **Hot swap** — replace any layer at runtime without restarting
+- **Parallel hooks** — multiple hooks at the same point run concurrently via `Promise.allSettled()`
+- **Session history** — `input.history` carries multi-turn conversation context through the pipeline
 - **Extensible** — add domain-specific hooks without changing the 6 core layers
 
 ---
@@ -664,14 +670,19 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - [x] Cultural context annotations
 - [x] Manifest system + Zod validation
 - [x] Graceful degradation + validation gate
+- [x] Typed layer fallbacks (downstream layers get valid shapes on failure)
+- [x] Outbound translation (auto English → user’s language)
+- [x] Parallel hook execution
+- [x] Session history (multi-turn conversation context)
 - [x] Hooks system (domain extensions without core changes)
 - [x] CLI (demo / validate / trace)
-- [x] 51+ tests passing
+- [x] 58+ tests passing
 - [x] Benchmark suite (latency, accuracy per layer)
 - [x] 8 domain manifests (food, healthcare, sports, legal, banking, education, e-commerce)
 - [ ] Production model examples (NLLB, Functionary)
 - [x] npm publish (`msm-ai` on npm)
 - [ ] Fine-tuning guide for domain-specific models
+- [ ] Streaming output (Time-to-First-Token)
 - [ ] Observability dashboard (per-layer trace visualization)
 - [ ] Web UI pipeline builder
 

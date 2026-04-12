@@ -22,6 +22,8 @@ export interface MSMInput {
   raw: string;
   modality: "text" | "voice" | "image";
   language?: string;
+  /** Conversation history for multi-turn context */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
 // ─── Context Annotation (Option C: Cultural Context) ─────────
@@ -123,6 +125,8 @@ export interface MSMPayload {
   execution?: ExecutionOutput;
   generation?: GenerationOutput;
   validation?: ValidationOutput;
+  /** Outbound translation: English response → user's language */
+  outbound_translation?: TranslationOutput;
   final_output?: FinalOutput;
 
   /** Hook outputs keyed by hook name (domain-specific extensions) */

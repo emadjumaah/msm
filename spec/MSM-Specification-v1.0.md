@@ -275,7 +275,35 @@ If a layer fails, the pipeline must not crash. The layer must:
 
 - Set `status` to `failed`
 - Populate `error` with a human-readable reason
-- Return a safe fallback output so downstream layers can attempt to continue or trigger a fallback response to the user
+- Return a **typed fallback** with valid layer-specific fields so downstream layers can continue safely
+
+Each layer has a typed fallback that preserves the downstream contract:
+
+| Layer          | Fallback Fields                                                         |
+| -------------- | ----------------------------------------------------------------------- |
+| Translation    | `translated_text: null`, `source_language: "unknown"`, `mode: "native"` |
+| Classification | `intent: "unknown"`, `domain: "general"`, `urgency: "normal"`           |
+| Orchestration  | `workflow_steps: ["fallback_response"]`, `tool_selections: []`          |
+| Execution      | `tool_results: []`, `execution_status: "failed"`, `errors: [msg]`       |
+| Generation     | `response_text: <fallback message>`, `tone: "neutral"`                  |
+| Validation     | `passed: true`, `action: "release"` (don't block on validator failure)  |
+
+### 4.4 Session History
+
+`MSMInput` supports an optional `history` field for multi-turn conversational context:
+
+```json
+{
+  "raw": "I'll have a burger",
+  "modality": "text",
+  "history": [
+    { "role": "user", "content": "What's on your menu?" },
+    { "role": "assistant", "content": "We have burgers, pizza, and more." }
+  ]
+}
+```
+
+Layers that support multi-turn context (e.g., Generation, Orchestration) may read `input.history` to produce contextually aware responses. The pipeline passes `history` through unchanged — it is the responsibility of each layer to use or ignore it.
 
 ---
 
@@ -293,7 +321,8 @@ All layers communicate via a single JSON payload that accumulates results as it 
   "input": {
     "raw": "ابي اطلب برغر وبيبسي",
     "modality": "text",
-    "language": "ar-gulf"
+    "language": "ar-gulf",
+    "history": []
   },
 
   "translation": {
@@ -394,6 +423,19 @@ All layers communicate via a single JSON payload that accumulates results as it 
       "status": "ok",
       "data": { "findings": ["...domain-specific results..."] }
     }
+  },
+
+  "outbound_translation": {
+    "translated_text": "تم تأكيد طلبك! التوصيل خلال 30 دقيقة تقريباً.",
+    "source_language": "en",
+    "target_language": "ar-gulf",
+    "layer_invoked": true,
+    "mode": "translated",
+    "confidence": 0.95,
+    "model_id": "nllb-200-600m",
+    "model_ver": "2.1",
+    "latency_ms": 38,
+    "status": "ok"
   },
 
   "final_output": {
