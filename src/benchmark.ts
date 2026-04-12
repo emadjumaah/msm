@@ -32,8 +32,9 @@ interface GoldenCase {
 }
 
 const GOLDEN_SET: GoldenCase[] = [
+  // ── Food Domain — Arabic ──────────────────────────────────
   {
-    label: "Arabic food order",
+    label: "AR: food order (burger)",
     input: "ابي اطلب برغر وبيبسي",
     expected: {
       intent: "place_order",
@@ -43,17 +44,17 @@ const GOLDEN_SET: GoldenCase[] = [
     },
   },
   {
-    label: "English food order",
-    input: "I want to order a pizza",
+    label: "AR: food order (coffee)",
+    input: "ابي قهوة عربية",
     expected: {
       intent: "place_order",
       domain: "food",
-      language: "en",
-      should_translate: false,
+      language: "ar",
+      should_translate: true,
     },
   },
   {
-    label: "Arabic order tracking",
+    label: "AR: food order tracking",
     input: "وين طلبي؟",
     expected: {
       intent: "track_order",
@@ -63,17 +64,7 @@ const GOLDEN_SET: GoldenCase[] = [
     },
   },
   {
-    label: "English cancellation",
-    input: "Cancel my order please",
-    expected: {
-      intent: "cancel",
-      domain: "food",
-      language: "en",
-      should_translate: false,
-    },
-  },
-  {
-    label: "Arabic cultural context (snack)",
+    label: "AR: food cultural context (snack)",
     input: "اريد شي خفيف",
     expected: {
       intent: "inquiry",
@@ -83,7 +74,7 @@ const GOLDEN_SET: GoldenCase[] = [
     },
   },
   {
-    label: "Arabic greeting",
+    label: "AR: greeting",
     input: "مرحبا",
     expected: {
       intent: "greeting",
@@ -93,17 +84,18 @@ const GOLDEN_SET: GoldenCase[] = [
     },
   },
   {
-    label: "English complaint",
-    input: "The food arrived cold and late",
+    label: "AR: urgent complaint",
+    input: "الاكل فيه مشكلة كبيرة ابي اكلم المدير",
     expected: {
       intent: "complaint",
       domain: "food",
-      language: "en",
-      should_translate: false,
+      language: "ar",
+      should_translate: true,
+      urgency: "high",
     },
   },
   {
-    label: "Arabic mixed code-switch",
+    label: "AR: code-switch order",
     input: "ابي pizza مع extra cheese",
     expected: {
       intent: "place_order",
@@ -113,7 +105,89 @@ const GOLDEN_SET: GoldenCase[] = [
     },
   },
   {
-    label: "English inquiry",
+    label: "AR: delivery ETA",
+    input: "متى يوصل الطلب؟",
+    expected: {
+      intent: "track_order",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: menu inquiry",
+    input: "عندكم شي حلويات؟",
+    expected: {
+      intent: "inquiry",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: cancel order",
+    input: "الغي الطلب لو سمحت",
+    expected: {
+      intent: "cancel",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: late delivery complaint",
+    input: "الطلب متأخر وايد",
+    expected: {
+      intent: "complaint",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: reorder",
+    input: "ابي نفس الطلب اللي قبل",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+
+  // ── Food Domain — English ─────────────────────────────────
+  {
+    label: "EN: food order (pizza)",
+    input: "I want to order a pizza",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: food cancellation",
+    input: "Cancel my order please",
+    expected: {
+      intent: "cancel",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: food complaint (cold)",
+    input: "The food arrived cold and late",
+    expected: {
+      intent: "complaint",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: opening hours inquiry",
     input: "What are your opening hours?",
     expected: {
       intent: "inquiry",
@@ -123,14 +197,346 @@ const GOLDEN_SET: GoldenCase[] = [
     },
   },
   {
-    label: "Arabic urgent complaint",
-    input: "الاكل فيه مشكلة كبيرة ابي اكلم المدير",
+    label: "EN: delivery order",
+    input: "I need a delivery to my office, two burgers and fries",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: track delivery",
+    input: "Where is my delivery? It's been 45 minutes",
+    expected: {
+      intent: "track_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: menu pricing",
+    input: "How much is the family meal?",
+    expected: {
+      intent: "inquiry",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: greeting",
+    input: "Hello, good evening",
+    expected: {
+      intent: "greeting",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: missing item complaint",
+    input: "My order is missing the drink I paid for",
     expected: {
       intent: "complaint",
       domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: multiple items order",
+    input: "Can I get two coffees and a croissant?",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+
+  // ── Retail / Support Domain — English ─────────────────────
+  {
+    label: "EN: product return",
+    input: "I want to return this product, it's defective",
+    expected: {
+      intent: "complaint",
+      domain: "retail",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: shipping inquiry",
+    input: "When will my shipping arrive?",
+    expected: {
+      intent: "track_order",
+      domain: "retail",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: product availability",
+    input: "Is this item available in the store?",
+    expected: {
+      intent: "inquiry",
+      domain: "retail",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: buy product",
+    input: "I want to buy this product and ship it to Dubai",
+    expected: {
+      intent: "place_order",
+      domain: "retail",
+      language: "en",
+      should_translate: false,
+    },
+  },
+
+  // ── Retail / Support Domain — Arabic ──────────────────────
+  {
+    label: "AR: product return",
+    input: "ابي ارجع المنتج فيه عيب",
+    expected: {
+      intent: "complaint",
+      domain: "retail",
       language: "ar",
       should_translate: true,
-      urgency: "high",
+    },
+  },
+  {
+    label: "AR: shipping tracking",
+    input: "وين الشحنة حقتي؟",
+    expected: {
+      intent: "track_order",
+      domain: "retail",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: price inquiry",
+    input: "كم سعر هالمنتج؟",
+    expected: {
+      intent: "inquiry",
+      domain: "retail",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+
+  // ── Support / Help Domain ─────────────────────────────────
+  {
+    label: "EN: general help",
+    input: "I need help with my account",
+    expected: {
+      intent: "inquiry",
+      domain: "support",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: service complaint",
+    input: "Your service has been terrible, I want to speak to a manager",
+    expected: {
+      intent: "complaint",
+      domain: "support",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "AR: account help",
+    input: "ابي مساعدة في حسابي",
+    expected: {
+      intent: "inquiry",
+      domain: "support",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: service complaint",
+    input: "خدمتكم سيئة جدا",
+    expected: {
+      intent: "complaint",
+      domain: "support",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+
+  // ── Edge Cases ────────────────────────────────────────────
+  {
+    label: "EDGE: empty-ish input",
+    input: "...",
+    expected: {
+      intent: "place_order", // ambiguous input — default classification
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EDGE: single word order",
+    input: "burger",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EDGE: very long English input",
+    input:
+      "I placed an order about two hours ago for three large pizzas, a family bucket of chicken wings, two liters of Pepsi, and a chocolate cake for my daughter's birthday party, and none of it has arrived yet, can you please check what happened?",
+    expected: {
+      intent: "track_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EDGE: polite cancel",
+    input: "Sorry but I changed my mind, please cancel everything",
+    expected: {
+      intent: "cancel",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EDGE: ambiguous (could be order or inquiry)",
+    input: "Do you have pasta?",
+    expected: {
+      intent: "inquiry",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EDGE: numbers and specifics",
+    input: "3 shawarma, 2 falafel, 1 hummus",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+
+  // ── Multi-domain Arabic ───────────────────────────────────
+  {
+    label: "AR: restaurant recommendation",
+    input: "وش افضل مطعم عندكم؟",
+    expected: {
+      intent: "inquiry",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: payment issue",
+    input: "ماقدرت ادفع، فيه مشكلة في الدفع",
+    expected: {
+      intent: "complaint",
+      domain: "support",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: order modification",
+    input: "ابي اغير الطلب واضيف عصير",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+  {
+    label: "AR: gratitude",
+    input: "شكرا، الطلب وصل تمام",
+    expected: {
+      intent: "greeting",
+      domain: "food",
+      language: "ar",
+      should_translate: true,
+    },
+  },
+
+  // ── Multi-domain English ──────────────────────────────────
+  {
+    label: "EN: dietary inquiry",
+    input: "Do you have any gluten-free options on the menu?",
+    expected: {
+      intent: "inquiry",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: bulk order",
+    input: "I need to order food for 20 people for a meeting tomorrow",
+    expected: {
+      intent: "place_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: wrong order complaint",
+    input: "You sent me the wrong order, I ordered chicken not beef",
+    expected: {
+      intent: "complaint",
+      domain: "food",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: store location",
+    input: "Where is your nearest store?",
+    expected: {
+      intent: "inquiry",
+      domain: "retail",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: cancel subscription",
+    input: "I want to cancel my subscription",
+    expected: {
+      intent: "cancel",
+      domain: "support",
+      language: "en",
+      should_translate: false,
+    },
+  },
+  {
+    label: "EN: order status via number",
+    input: "What's the status of order #12345?",
+    expected: {
+      intent: "track_order",
+      domain: "food",
+      language: "en",
+      should_translate: false,
     },
   },
 ];

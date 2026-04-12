@@ -67,6 +67,7 @@ export class OllamaOrchestrationLayer implements MSMLayer<OrchestrationOutput> {
       workflow_steps: steps,
       tool_selections: tools,
       estimated_steps: steps.length,
+      mode: "llm",
       model_id: this.model,
       model_ver: "1.0.0",
       latency_ms: latency,

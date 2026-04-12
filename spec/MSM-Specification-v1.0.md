@@ -264,7 +264,7 @@ Every layer output block must include:
 | -------------- | ----------------------------------------------------------------------------------------------------- |
 | Translation    | `translated_text`, `source_language`, `target_language`, `confidence`, `mode`, `context_annotations?` |
 | Classification | `intent`, `domain`, `urgency`, `confidence`, `routing_target`                                         |
-| Orchestration  | `workflow_steps[]`, `tool_selections[]`, `estimated_steps`                                            |
+| Orchestration  | `workflow_steps[]`, `tool_selections[]`, `estimated_steps`, `mode`                                    |
 | Execution      | `tool_results[]`, `execution_status`, `errors[]`                                                      |
 | Generation     | `response_text`, `tone`, `word_count`                                                                 |
 | Validation     | `passed`, `quality_score`, `policy_violations[]`, `action`                                            |
@@ -654,6 +654,23 @@ These are the best available starting points for each layer as of 2026. Any mode
 | AraBERT                        | 135M       | Arabic BERT, strong baseline                                             |
 
 ### Layer 3 — Orchestration
+
+The Orchestration layer plans workflow steps and selects tools. It supports three resolution modes:
+
+| Mode     | Description                                                        | Best For                         |
+| -------- | ------------------------------------------------------------------ | -------------------------------- |
+| `rules`  | Deterministic workflow lookup by intent. Fastest, most predictable. | Known domains with fixed intents |
+| `llm`    | LLM-planned workflows. Flexible but less deterministic.            | Open-ended or novel intents      |
+| `hybrid` | Rules first, LLM fallback when no rule matches.                    | Production systems (recommended) |
+
+Set `orchestration_mode` in the manifest to control this:
+
+```yaml
+orchestration:
+  provider: ollama
+  model: "qwen2.5:3b"
+  orchestration_mode: hybrid   # rules | llm | hybrid
+```
 
 | Model             | Size | Notes                                                                                |
 | ----------------- | ---- | ------------------------------------------------------------------------------------ |

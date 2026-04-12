@@ -57,10 +57,14 @@ export interface ClassificationOutput extends LayerMeta {
 
 // ─── Layer 3: Orchestration ──────────────────────────────────
 
+export type OrchestrationMode = "rules" | "llm" | "hybrid";
+
 export interface OrchestrationOutput extends LayerMeta {
   workflow_steps: string[];
   tool_selections: string[];
   estimated_steps: number;
+  /** How the workflow was resolved: rules, llm, or hybrid (rules + llm fallback) */
+  mode: OrchestrationMode;
 }
 
 // ─── Layer 4: Execution ──────────────────────────────────────

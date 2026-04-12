@@ -5,12 +5,24 @@ import type {
 } from "../core/types.js";
 
 /**
- * Dummy Orchestration Layer
- * Returns hardcoded workflows by intent.
- * Real implementation would use Qwen 2.5 3B.
+ * Dummy Orchestration Layer — rules-based workflow resolver.
+ *
+ * This is intentionally deterministic. For structured domain tasks,
+ * rules are more reliable than LLM planning. The real production
+ * pattern is "hybrid": rules for known intents, LLM fallback for unknown.
+ *
+ * Real implementation options:
+ *   - "rules" (this): fastest, most deterministic, best for known domains
+ *   - "llm": Qwen 2.5 3B or similar for open-ended planning
+ *   - "hybrid": rules first, LLM fallback when no rule matches
  */
 
-const WORKFLOWS: Record<string, { steps: string[]; tools: string[] }> = {
+interface WorkflowRule {
+  steps: string[];
+  tools: string[];
+}
+
+const WORKFLOWS: Record<string, WorkflowRule> = {
   place_order: {
     steps: [
       "get_location",
@@ -53,7 +65,7 @@ const WORKFLOWS: Record<string, { steps: string[]; tools: string[] }> = {
   },
 };
 
-const DEFAULT_WORKFLOW = {
+const DEFAULT_WORKFLOW: WorkflowRule = {
   steps: ["analyze_request", "fetch_data", "generate_response"],
   tools: ["knowledge_api"],
 };
@@ -64,16 +76,18 @@ export class DummyOrchestrationLayer implements MSMLayer<OrchestrationOutput> {
   async process(payload: MSMPayload): Promise<OrchestrationOutput> {
     const start = performance.now();
     const intent = payload.classification?.intent ?? "inquiry";
-    const wf = WORKFLOWS[intent] ?? DEFAULT_WORKFLOW;
+    const matched = WORKFLOWS[intent];
+    const wf = matched ?? DEFAULT_WORKFLOW;
 
     return {
       workflow_steps: wf.steps,
       tool_selections: wf.tools,
       estimated_steps: wf.steps.length,
+      mode: matched ? "rules" : "rules", // dummy always uses rules
       model_id: "dummy-orchestration-v1",
       model_ver: "1.0.0",
       latency_ms: Math.round(performance.now() - start),
-      confidence: 0.7,
+      confidence: matched ? 0.9 : 0.5, // higher confidence when rule matched
       status: "ok",
     };
   }

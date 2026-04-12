@@ -4,7 +4,7 @@
 
 MSM is an open standard for building commercial AI systems using a coordinated pipeline of small, specialized models instead of a single large language model.
 
-Each model masters one task. Together they deliver results that match or exceed large LLMs — at a fraction of the cost, latency, and infrastructure.
+Each model masters one task. Together they deliver results that match large LLMs on structured, domain-specific tasks — at a fraction of the cost, latency, and infrastructure.
 
 ```
 User Input (any language)
@@ -45,11 +45,32 @@ If your problem is "I need GPT-4 to do X" → use LangChain. If your problem is 
 | ----------------- | ------------------ | ---------------------------------- |
 | Cost per call     | High               | 10–20x lower                       |
 | Latency           | 2–5 seconds        | Under 1 second (GPU)               |
-| Domain accuracy   | ~80% general       | 95%+ specialized                   |
+| Domain accuracy   | ~80% general       | 90%+ specialized (domain-tuned)    |
 | Language support  | English-first      | Any language via Translation Layer |
 | On-premise deploy | Impractical        | Single GPU or CPU                  |
 | Layer upgrades    | Replace everything | Swap one model                     |
 | Auditability      | Black box          | Per-layer trace                    |
+
+---
+
+## When to Use MSM (and When Not To)
+
+**MSM is best for:**
+
+- Structured, repeatable domain tasks (ordering, triage, booking, support)
+- Multi-language deployments where cultural context matters
+- On-premise / air-gapped environments
+- Cost-sensitive production systems (10–20x cheaper than LLM APIs)
+- Regulated domains that need per-layer auditability
+
+**MSM is not the right choice for:**
+
+- Open-ended reasoning or creative writing (use GPT-4, Claude)
+- Tasks that require broad world knowledge across many domains
+- Rapid prototyping where you don't yet know the domain structure
+- Single-turn Q&A with no domain specialization
+
+MSM replaces LLMs for **structured domain pipelines**. It does not replace LLMs for **general intelligence**.
 
 ---
 
@@ -584,22 +605,22 @@ msm/
 
 ## Benchmarks
 
-Run the benchmark suite against the golden test set (10 Arabic + English cases):
+Run the benchmark suite against the golden test set (49 Arabic + English cases across food, retail, and support domains):
 
 ```bash
 pnpm benchmark               # dummy models only
 pnpm benchmark:ollama        # dummy + Ollama side-by-side
 ```
 
-### Dummy Provider Results (10 cases)
+### Dummy Provider Results (49 cases)
 
 | Metric                   | Score |
 | ------------------------ | ----- |
-| Avg latency per request  | 1ms   |
-| Intent accuracy          | 90%   |
-| Domain accuracy          | 100%  |
+| Avg latency per request  | 0ms   |
+| Intent accuracy          | 69%   |
+| Domain accuracy          | 88%   |
 | Translation skip correct | 100%  |
-| Annotation rate          | 67%   |
+| Annotation rate          | 48%   |
 | Validation pass rate     | 100%  |
 
 | Layer          | Avg | Min | Max | Success |
@@ -611,7 +632,7 @@ pnpm benchmark:ollama        # dummy + Ollama side-by-side
 | Generation     | 0ms | 0ms | 0ms | 100%    |
 | Validation     | 0ms | 0ms | 0ms | 100%    |
 
-> Dummy models are instant (in-memory) — latency is 0ms. The value is in accuracy: 90% intent accuracy and 100% domain accuracy from simple keyword matching, proving the pipeline contracts work. Run `pnpm benchmark:ollama` to see real model latency and accuracy.
+> Dummy models are instant (in-memory) — latency is 0ms. The value is in accuracy: the keyword-based classifier hits 69% intent accuracy and 88% domain accuracy across 49 diverse cases — proving the pipeline contracts work. The remaining accuracy gap is exactly what real models close. Run `pnpm benchmark:ollama` to see the difference.
 
 ### What to expect from Ollama
 
@@ -651,7 +672,8 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - [ ] Production model examples (NLLB, Functionary)
 - [x] npm publish (`msm-ai` on npm)
 - [ ] Fine-tuning guide for domain-specific models
-- [ ] Web UI dashboard
+- [ ] Observability dashboard (per-layer trace visualization)
+- [ ] Web UI pipeline builder
 
 ## Philosophy
 

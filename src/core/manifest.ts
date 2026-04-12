@@ -12,6 +12,7 @@ const LayerConfigSchema = z.object({
   dataset: z.string().optional(),
   endpoint: z.string().optional(), // HTTP endpoint for real model servers
   mode: z.enum(["translated", "native"]).optional(), // Translation layer mode
+  orchestration_mode: z.enum(["rules", "llm", "hybrid"]).optional(), // Orchestration strategy
 });
 
 const HOOK_POINTS = [
