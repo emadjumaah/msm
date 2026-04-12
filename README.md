@@ -600,14 +600,14 @@ pnpm benchmark:ollama        # dummy + Ollama side-by-side
 | Annotation rate          | 67%   |
 | Validation pass rate     | 100%  |
 
-| Layer          | Avg    | Min  | Max  | Success |
-| -------------- | ------ | ---- | ---- | ------- |
-| Translation    | 0ms    | 0ms  | 0ms  | 100%    |
-| Classification | 0ms    | 0ms  | 0ms  | 100%    |
-| Orchestration  | 0ms    | 0ms  | 0ms  | 100%    |
-| Execution      | 0ms    | 0ms  | 0ms  | 100%    |
-| Generation     | 0ms    | 0ms  | 0ms  | 100%    |
-| Validation     | 0ms    | 0ms  | 0ms  | 100%    |
+| Layer          | Avg | Min | Max | Success |
+| -------------- | --- | --- | --- | ------- |
+| Translation    | 0ms | 0ms | 0ms | 100%    |
+| Classification | 0ms | 0ms | 0ms | 100%    |
+| Orchestration  | 0ms | 0ms | 0ms | 100%    |
+| Execution      | 0ms | 0ms | 0ms | 100%    |
+| Generation     | 0ms | 0ms | 0ms | 100%    |
+| Validation     | 0ms | 0ms | 0ms | 100%    |
 
 > Dummy models are instant (in-memory) — latency is 0ms. The value is in accuracy: 90% intent accuracy and 100% domain accuracy from simple keyword matching, proving the pipeline contracts work. Run `pnpm benchmark:ollama` to see real model latency and accuracy.
 

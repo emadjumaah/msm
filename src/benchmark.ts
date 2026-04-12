@@ -238,8 +238,10 @@ async function runBenchmark(
     cases: GOLDEN_SET.length,
     total_latency_ms: Math.round(totalLatencies.reduce((a, b) => a + b, 0)),
     avg_latency_ms: Math.round(avg(totalLatencies)),
-    intent_accuracy: scores.filter((s) => s.intent_match).length / scores.length,
-    domain_accuracy: scores.filter((s) => s.domain_match).length / scores.length,
+    intent_accuracy:
+      scores.filter((s) => s.intent_match).length / scores.length,
+    domain_accuracy:
+      scores.filter((s) => s.domain_match).length / scores.length,
     translation_skip_accuracy:
       scores.filter((s) => s.skip_correct).length / scores.length,
     annotation_rate:
@@ -273,7 +275,9 @@ function printResult(r: BenchmarkResult) {
   console.log(`  Avg latency per request:  ${r.avg_latency_ms}ms`);
   console.log(`  Intent accuracy:          ${pct(r.intent_accuracy)}`);
   console.log(`  Domain accuracy:          ${pct(r.domain_accuracy)}`);
-  console.log(`  Translation skip correct: ${pct(r.translation_skip_accuracy)}`);
+  console.log(
+    `  Translation skip correct: ${pct(r.translation_skip_accuracy)}`,
+  );
   console.log(`  Annotation rate:          ${pct(r.annotation_rate)}`);
   console.log(`  Validation pass rate:     ${pct(r.validation_pass_rate)}`);
 
