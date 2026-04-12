@@ -39,7 +39,7 @@ pnpm msm validate examples/your-manifest.yaml
 Add support for a new model backend (OpenAI, vLLM, ONNX, etc.) without changing core code:
 
 ```typescript
-import { getDefaultRegistry } from "msm";
+import { getDefaultRegistry } from "msm-ai";
 
 const registry = await getDefaultRegistry();
 registry.register(
@@ -56,8 +56,8 @@ Now `provider: openai` works in any manifest.
 Implement the `MSMLayer` interface. For HTTP-backed models, extend `HttpLayer`:
 
 ```typescript
-import { HttpLayer } from "msm";
-import type { TranslationOutput, MSMPayload } from "msm";
+import { HttpLayer } from "msm-ai";
+import type { TranslationOutput, MSMPayload } from "msm-ai";
 
 class NLLBTranslationLayer extends HttpLayer<TranslationOutput> {
   name = "translation" as const;
@@ -80,7 +80,7 @@ class NLLBTranslationLayer extends HttpLayer<TranslationOutput> {
 Hooks extend the pipeline for domain-specific needs (image recognition, drug checks, fraud detection) without changing core layers:
 
 ```typescript
-import type { MSMHook } from "msm";
+import type { MSMHook } from "msm-ai";
 
 const myHook: MSMHook = {
   name: "image_analysis",

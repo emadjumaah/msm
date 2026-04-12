@@ -55,6 +55,12 @@ If your problem is "I need GPT-4 to do X" → use LangChain. If your problem is 
 
 ## Getting Started
 
+### Install from npm
+
+```bash
+npm install msm-ai
+```
+
 ### Option A: Try instantly (no models needed)
 
 ```bash
@@ -63,8 +69,6 @@ cd msm
 pnpm install
 pnpm demo          # runs with dummy models — zero setup
 ```
-
-> **Note:** MSM is not yet published to npm. For now, clone the repo and import from source. `npm publish` is on the [roadmap](#roadmap).
 
 ### Option B: Run with real AI models (Ollama)
 
@@ -154,7 +158,7 @@ layers:
 ### Run any manifest
 
 ```typescript
-import { createPipeline } from "msm";
+import { createPipeline } from "msm-ai";
 
 // One line: reads manifest → looks up providers → creates all layers → returns pipeline
 const pipeline = await createPipeline(
@@ -195,7 +199,7 @@ MSM ships with two built-in providers: `dummy` and `ollama`. Adding your own tak
 ### Step 1: Create your layer class
 
 ```typescript
-import type { MSMLayer, MSMPayload, TranslationOutput } from "msm";
+import type { MSMLayer, MSMPayload, TranslationOutput } from "msm-ai";
 
 class OpenAITranslationLayer implements MSMLayer<TranslationOutput> {
   name = "translation" as const;
@@ -235,7 +239,7 @@ class OpenAITranslationLayer implements MSMLayer<TranslationOutput> {
 ### Step 2: Register it
 
 ```typescript
-import { getDefaultRegistry, createPipeline } from "msm";
+import { getDefaultRegistry, createPipeline } from "msm-ai";
 
 const registry = await getDefaultRegistry();
 registry.register(
@@ -262,8 +266,8 @@ layers:
 ### Or extend HttpLayer for even less code
 
 ```typescript
-import { HttpLayer } from "msm";
-import type { TranslationOutput, MSMPayload } from "msm";
+import { HttpLayer } from "msm-ai";
+import type { TranslationOutput, MSMPayload } from "msm-ai";
 
 class NLLBTranslationLayer extends HttpLayer<TranslationOutput> {
   name = "translation" as const;
@@ -357,8 +361,8 @@ hooks:
 ### Use hooks in code
 
 ```typescript
-import { Pipeline } from "msm";
-import type { MSMHook } from "msm";
+import { Pipeline } from "msm-ai";
+import type { MSMHook } from "msm-ai";
 
 const pipeline = new Pipeline();
 // ... register 6 core layers ...
@@ -565,7 +569,7 @@ msm/
 - [x] 51+ tests passing
 - [ ] Benchmark suite (latency, accuracy per layer)
 - [ ] Production model examples (NLLB, Functionary)
-- [ ] npm publish
+- [x] npm publish (`msm-ai` on npm)
 - [ ] Web UI dashboard
 
 ## Philosophy
