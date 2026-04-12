@@ -932,3 +932,235 @@ describe("Hook Direction Filtering", () => {
     expect(hookCallCount).toBe(2);
   });
 });
+
+// ─── Pipeline Status: "failed" ──────────────────────────────
+
+describe("Pipeline Status: failed", () => {
+  it("reports 'failed' when generation layer is missing", async () => {
+    const pipeline = new Pipeline();
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyOrchestrationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    // no generation layer
+    pipeline.register(new DummyValidationLayer());
+
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+    expect(trace.payload.final_output?.pipeline_status).toBe("failed");
+  });
+
+  it("reports 'failed' when generation layer throws", async () => {
+    const pipeline = buildPipeline();
+    pipeline.swap({
+      name: "generation",
+      async process(): Promise<never> {
+        throw new Error("model crashed");
+      },
+    });
+
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+    expect(trace.payload.final_output?.pipeline_status).toBe("failed");
+  });
+});
+
+// ─── TraceEntry: retry_attempt ──────────────────────────────
+
+describe("TraceEntry retry_attempt", () => {
+  it("includes retry_attempt on entries produced during retry pass", async () => {
+    let attempts = 0;
+    const pipeline = new Pipeline({ maxRetries: 1 });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyOrchestrationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register({
+      name: "validation",
+      async process(): Promise<ValidationOutput> {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            passed: false,
+            quality_score: 0.2,
+            policy_violations: ["test"],
+            action: "retry",
+            model_id: "val",
+            model_ver: "1.0",
+            latency_ms: 0,
+            confidence: 1,
+            status: "ok",
+          };
+        }
+        return {
+          passed: true,
+          quality_score: 0.9,
+          policy_violations: [],
+          action: "release",
+          model_id: "val",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
+
+    const trace = await pipeline.run({ raw: "test", modality: "text" });
+
+    // First-pass entries should NOT have retry_attempt
+    const firstGen = trace.entries.find(
+      (e) => e.layer === "generation" && !e.retry_attempt,
+    );
+    expect(firstGen).toBeDefined();
+
+    // Retry-pass entries SHOULD have retry_attempt
+    const retryEntries = trace.entries.filter((e) => e.retry_attempt === 1);
+    expect(retryEntries.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── Duplicate Hook Name ─────────────────────────────────────
+
+describe("Duplicate hook names", () => {
+  it("throws on duplicate hook name", () => {
+    const pipeline = buildPipeline();
+    const hook1: MSMHook = {
+      name: "my_hook",
+      point: "before:generation",
+      async process(): Promise<HookOutput> {
+        return {
+          model_id: "h",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+          data: {},
+        };
+      },
+    };
+    const hook2: MSMHook = {
+      name: "my_hook",
+      point: "after:generation",
+      async process(): Promise<HookOutput> {
+        return {
+          model_id: "h",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+          data: {},
+        };
+      },
+    };
+    pipeline.addHook(hook1);
+    expect(() => pipeline.addHook(hook2)).toThrow("Duplicate hook name");
+  });
+});
+
+// ─── AbortSignal Cancellation ────────────────────────────────
+
+describe("AbortSignal", () => {
+  it("throws 'Pipeline aborted' when signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const pipeline = new Pipeline({ signal: controller.signal });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyOrchestrationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    await expect(
+      pipeline.run({ raw: "hello", modality: "text" }),
+    ).rejects.toThrow("Pipeline aborted");
+  });
+
+  it("aborts mid-pipeline when signal is triggered", async () => {
+    const controller = new AbortController();
+    let layersRun = 0;
+
+    const pipeline = new Pipeline({ signal: controller.signal });
+    for (const name of [
+      "translation",
+      "classification",
+      "orchestration",
+      "execution",
+      "generation",
+      "validation",
+    ] as const) {
+      pipeline.register({
+        name,
+        async process() {
+          layersRun++;
+          // Abort after first layer
+          if (layersRun === 1) controller.abort();
+          return {
+            model_id: name,
+            model_ver: "1.0",
+            latency_ms: 0,
+            confidence: 1,
+            status: "ok",
+          } as any;
+        },
+      });
+    }
+
+    await expect(
+      pipeline.run({ raw: "hello", modality: "text" }),
+    ).rejects.toThrow("Pipeline aborted");
+    // Only 1 layer should have run before abort was checked
+    expect(layersRun).toBe(1);
+  });
+});
+
+// ─── Pipeline freeze() ──────────────────────────────────────
+
+describe("Pipeline freeze", () => {
+  it("prevents register/swap/addHook after freeze()", () => {
+    const pipeline = buildPipeline();
+    pipeline.freeze();
+
+    expect(() => pipeline.register(new DummyTranslationLayer())).toThrow(
+      "frozen",
+    );
+    expect(() => pipeline.swap(new DummyTranslationLayer())).toThrow("frozen");
+    expect(() =>
+      pipeline.addHook({
+        name: "x",
+        point: "before:generation",
+        async process(): Promise<HookOutput> {
+          return {
+            model_id: "x",
+            model_ver: "1.0",
+            latency_ms: 0,
+            confidence: 1,
+            status: "ok",
+            data: {},
+          };
+        },
+      }),
+    ).toThrow("frozen");
+  });
+
+  it("allows run() after freeze()", async () => {
+    const pipeline = buildPipeline();
+    pipeline.freeze();
+
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+    expect(trace.payload.final_output).toBeDefined();
+  });
+});
+
+// ─── Tone type constraint ────────────────────────────────────
+
+describe("Tone type", () => {
+  it("generation output uses valid Tone value", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+
+    const validTones = ["warm", "neutral", "formal", "apologetic"];
+    expect(validTones).toContain(trace.payload.generation?.tone);
+  });
+});

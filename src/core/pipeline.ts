@@ -5,6 +5,7 @@ import type {
   MSMInput,
   LayerName,
   LayerMeta,
+  LayerStatus,
   TranslationOutput,
   ClassificationOutput,
   OrchestrationOutput,
@@ -25,8 +26,10 @@ export interface TraceEntry {
   model_id: string;
   latency_ms: number;
   confidence: number;
-  status: string;
+  status: LayerStatus;
   error?: string;
+  /** Retry attempt number (present only on entries produced during a retry pass) */
+  retry_attempt?: number;
 }
 
 export interface PipelineTrace {
@@ -43,6 +46,8 @@ export interface PipelineTrace {
 export interface PipelineOptions {
   /** Max retries when validation returns action "retry" (default: 1) */
   maxRetries?: number;
+  /** AbortSignal for pipeline-level cancellation / timeout */
+  signal?: AbortSignal;
 }
 
 // ─── Fallback response when pipeline cannot produce output ───
@@ -138,30 +143,92 @@ function getLayerFallback(
   }
 }
 
+// ─── Typed payload setter (avoids `as unknown` casts) ────────
+
+function setLayerResult(
+  payload: MSMPayload,
+  name: LayerName,
+  result: LayerMeta,
+): void {
+  switch (name) {
+    case "translation":
+      payload.translation = result as TranslationOutput;
+      break;
+    case "classification":
+      payload.classification = result as ClassificationOutput;
+      break;
+    case "orchestration":
+      payload.orchestration = result as OrchestrationOutput;
+      break;
+    case "execution":
+      payload.execution = result as ExecutionOutput;
+      break;
+    case "generation":
+      payload.generation = result as GenerationOutput;
+      break;
+    case "validation":
+      payload.validation = result as ValidationOutput;
+      break;
+  }
+}
+
 // ─── Pipeline Engine ─────────────────────────────────────────
 
 export class Pipeline {
   private layers = new Map<LayerName, MSMLayer>();
   private hooks: MSMHook[] = [];
+  private hookNames = new Set<string>();
   private manifest: MSMManifest | null = null;
-  private options: Required<PipelineOptions>;
+  private frozen = false;
+  private options: Required<Pick<PipelineOptions, "maxRetries">> & {
+    signal?: AbortSignal;
+  };
 
   constructor(options?: PipelineOptions) {
-    this.options = { maxRetries: options?.maxRetries ?? 1 };
+    this.options = {
+      maxRetries: options?.maxRetries ?? 1,
+      signal: options?.signal,
+    };
+  }
+
+  /**
+   * Freeze the pipeline — no further register(), swap(), or addHook() calls allowed.
+   * Call this before sharing a pipeline instance across concurrent requests.
+   * run() itself is safe to call concurrently: it snapshots layers/hooks at the start.
+   */
+  freeze(): void {
+    this.frozen = true;
+  }
+
+  private assertMutable(): void {
+    if (this.frozen) {
+      throw new Error(
+        "Pipeline is frozen. No further register/swap/addHook calls allowed.",
+      );
+    }
   }
 
   /** Register a layer implementation */
   register(layer: MSMLayer): void {
+    this.assertMutable();
     this.layers.set(layer.name, layer);
   }
 
   /** Swap a single layer at runtime */
   swap(layer: MSMLayer): void {
+    this.assertMutable();
     this.layers.set(layer.name, layer);
   }
 
-  /** Add a hook — runs before or after a core layer */
+  /** Add a hook — runs before or after a core layer. Throws on duplicate name. */
   addHook(hook: MSMHook): void {
+    this.assertMutable();
+    if (this.hookNames.has(hook.name)) {
+      throw new Error(
+        `Duplicate hook name "${hook.name}". Each hook must have a unique name.`,
+      );
+    }
+    this.hookNames.add(hook.name);
     this.hooks.push(hook);
   }
 
@@ -226,6 +293,7 @@ export class Pipeline {
     const sid = sessionId ?? randomUUID();
     const startTime = performance.now();
     const entries: TraceEntry[] = [];
+    const signal = this.options.signal;
 
     // Snapshot layers at the start for atomic execution —
     // mid-flight swap() calls won't affect this run
@@ -253,11 +321,17 @@ export class Pipeline {
     let retries = 0;
     let startIdx = 0;
     let done = false;
+    let usedFallbackGeneration = false;
 
     while (!done) {
       done = true; // assume we'll finish this pass
 
       for (let i = startIdx; i < order.length; i++) {
+        // Check for pipeline-level cancellation
+        if (signal?.aborted) {
+          throw new Error("Pipeline aborted");
+        }
+
         const name = order[i];
         const layer = layers.get(name);
 
@@ -267,7 +341,8 @@ export class Pipeline {
             name,
             `Layer "${name}" not registered`,
           );
-          (payload as unknown as Record<string, unknown>)[name] = fallback;
+          setLayerResult(payload, name, fallback);
+          if (name === "generation") usedFallbackGeneration = true;
           entries.push({
             layer: name,
             model_id: fallback.model_id,
@@ -275,6 +350,7 @@ export class Pipeline {
             confidence: 0,
             status: "failed",
             error: fallback.error,
+            ...(retries > 0 ? { retry_attempt: retries } : {}),
           });
           continue;
         }
@@ -289,9 +365,10 @@ export class Pipeline {
           // Graceful degradation: typed fallback preserves downstream contracts
           const errMsg = err instanceof Error ? err.message : String(err);
           result = getLayerFallback(name, errMsg);
+          if (name === "generation") usedFallbackGeneration = true;
         }
 
-        (payload as unknown as Record<string, unknown>)[name] = result;
+        setLayerResult(payload, name, result);
 
         entries.push({
           layer: name,
@@ -300,6 +377,7 @@ export class Pipeline {
           confidence: result.confidence,
           status: result.status,
           error: result.error,
+          ...(retries > 0 ? { retry_attempt: retries } : {}),
         });
 
         // Run after-hooks (sequential, declaration order per spec)
@@ -346,6 +424,11 @@ export class Pipeline {
     // ── Outbound Translation ─────────────────────────────────
     // If the inbound translation was invoked (non-English input),
     // translate the generated response back to the user's language.
+    //
+    // NOTE: Outbound translation runs AFTER validation intentionally.
+    // Validation checks the English generation output (consistent language
+    // for policy rules). Re-validating after translation would require
+    // language-specific policy rules — a future enhancement if needed.
     const inbound = payload.translation as TranslationOutput | undefined;
     const generation = payload.generation as GenerationOutput | undefined;
     const responseText = generation?.response_text ?? FALLBACK_RESPONSE;
@@ -417,6 +500,9 @@ export class Pipeline {
         : responseText;
 
     // Compute aggregate pipeline status from core layer entries
+    // "ok"       — all layers succeeded
+    // "degraded" — some layers failed but generation produced real output
+    // "failed"   — generation itself used fallback (output is not meaningful)
     const coreStatuses = entries
       .filter(
         (e) =>
@@ -425,9 +511,9 @@ export class Pipeline {
       .map((e) => e.status);
     const hasFailed = coreStatuses.some((s) => s === "failed");
     const hasDegraded = coreStatuses.some((s) => s === "degraded");
-    const pipelineStatus: "ok" | "degraded" | "failed" = hasFailed
-      ? "degraded"
-      : hasDegraded
+    const pipelineStatus: "ok" | "degraded" | "failed" = usedFallbackGeneration
+      ? "failed"
+      : hasFailed || hasDegraded
         ? "degraded"
         : "ok";
 

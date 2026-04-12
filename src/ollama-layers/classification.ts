@@ -1,9 +1,16 @@
+import { z } from "zod";
 import type {
   MSMLayer,
   MSMPayload,
   ClassificationOutput,
 } from "../core/types.js";
 import { ollamaGenerate } from "./ollama-client.js";
+
+const ClassificationSchema = z.object({
+  intent: z.string().default("inquiry"),
+  domain: z.string().default("general"),
+  urgency: z.string().default("normal"),
+});
 
 const SYSTEM_PROMPT = `You are an intent classifier for a commercial AI system.
 Given a user message (already translated to English), classify the user's INTENT, DOMAIN, and URGENCY.
@@ -66,9 +73,10 @@ export class OllamaClassificationLayer implements MSMLayer<ClassificationOutput>
 
     const latency = Math.round(performance.now() - start);
 
-    let parsed: { intent: string; domain: string; urgency: string };
+    let parsed: z.infer<typeof ClassificationSchema>;
     try {
-      parsed = JSON.parse(res.response);
+      const raw = JSON.parse(res.response);
+      parsed = ClassificationSchema.parse(raw);
     } catch {
       parsed = { intent: "inquiry", domain: "general", urgency: "normal" };
     }

@@ -31,29 +31,55 @@ const DEFAULT_BASE_URL =
   process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 
 const DEFAULT_TIMEOUT_MS = 30_000; // 30s per request
+const MAX_RETRIES = 1;
+const RETRY_DELAY_MS = 500;
+
+/** Check if an error is transient and worth retrying */
+function isTransient(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
 
 export async function ollamaGenerate(
   req: OllamaRequest,
   baseUrl = DEFAULT_BASE_URL,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<OllamaResponse> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let lastError: Error | undefined;
 
-  try {
-    const res = await fetch(`${baseUrl}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...req, stream: false }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
     }
 
-    return (await res.json()) as OllamaResponse;
-  } finally {
-    clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(`${baseUrl}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...req, stream: false }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        if (isTransient(res.status) && attempt < MAX_RETRIES) {
+          lastError = new Error(`Ollama error ${res.status}`);
+          continue;
+        }
+        throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
+      }
+
+      return (await res.json()) as OllamaResponse;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // Retry on network errors (e.g. ECONNRESET, AbortError from timeout)
+      if (attempt < MAX_RETRIES) continue;
+      throw lastError;
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  throw lastError ?? new Error("ollamaGenerate: unexpected retry exhaustion");
 }

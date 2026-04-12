@@ -12,6 +12,7 @@ export type {
   OrchestrationMode,
   OrchestrationOutput,
   ExecutionOutput,
+  Tone,
   GenerationOutput,
   ValidationOutput,
   FinalOutput,

@@ -1,9 +1,15 @@
+import { z } from "zod";
 import type {
   MSMLayer,
   MSMPayload,
   OrchestrationOutput,
 } from "../core/types.js";
 import { ollamaGenerate } from "./ollama-client.js";
+
+const OrchestrationSchema = z.object({
+  workflow_steps: z.array(z.string()).default(["process_request"]),
+  tool_selections: z.array(z.string()).default(["knowledge_api"]),
+});
 
 const SYSTEM_PROMPT = `You are a workflow planner for a commercial AI system.
 Given a classified user intent and domain, plan the execution steps.
@@ -46,9 +52,10 @@ export class OllamaOrchestrationLayer implements MSMLayer<OrchestrationOutput> {
 
     const latency = Math.round(performance.now() - start);
 
-    let parsed: { workflow_steps: string[]; tool_selections: string[] };
+    let parsed: z.infer<typeof OrchestrationSchema>;
     try {
-      parsed = JSON.parse(res.response);
+      const raw = JSON.parse(res.response);
+      parsed = OrchestrationSchema.parse(raw);
     } catch {
       parsed = {
         workflow_steps: ["process_request"],
@@ -56,12 +63,8 @@ export class OllamaOrchestrationLayer implements MSMLayer<OrchestrationOutput> {
       };
     }
 
-    const steps = Array.isArray(parsed.workflow_steps)
-      ? parsed.workflow_steps
-      : ["process_request"];
-    const tools = Array.isArray(parsed.tool_selections)
-      ? parsed.tool_selections
-      : ["knowledge_api"];
+    const steps = parsed.workflow_steps;
+    const tools = parsed.tool_selections;
 
     return {
       workflow_steps: steps,

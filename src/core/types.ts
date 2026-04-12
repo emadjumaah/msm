@@ -89,9 +89,11 @@ export interface ExecutionOutput extends LayerMeta {
 
 // ─── Layer 5: Generation ─────────────────────────────────────
 
+export type Tone = "warm" | "neutral" | "formal" | "apologetic";
+
 export interface GenerationOutput extends LayerMeta {
   response_text: string;
-  tone: string;
+  tone: Tone;
   word_count: number;
 }
 

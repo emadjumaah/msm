@@ -1,4 +1,9 @@
-import type { MSMLayer, MSMPayload, GenerationOutput } from "../core/types.js";
+import type {
+  MSMLayer,
+  MSMPayload,
+  GenerationOutput,
+  Tone,
+} from "../core/types.js";
 
 /**
  * Dummy Generation Layer
@@ -70,7 +75,7 @@ export class DummyGenerationLayer implements MSMLayer<GenerationOutput> {
 
     return {
       response_text: text,
-      tone: "warm",
+      tone: "warm" as Tone,
       word_count: text.split(/\s+/).length,
       model_id: "dummy-generation-v1",
       model_ver: "1.0.0",

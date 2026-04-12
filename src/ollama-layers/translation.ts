@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   MSMLayer,
   MSMPayload,
@@ -5,6 +6,23 @@ import type {
   ContextAnnotation,
 } from "../core/types.js";
 import { ollamaGenerate } from "./ollama-client.js";
+
+const OutboundSchema = z.object({
+  translated_text: z.string().default(""),
+});
+
+const AnnotationSchema = z.object({
+  original_term: z.string(),
+  translated_term: z.string().default(""),
+  cultural_meaning: z.string(),
+  intent_hints: z.array(z.string()).default([]),
+});
+
+const InboundSchema = z.object({
+  translated_text: z.string().default(""),
+  source_language: z.string().default("unknown"),
+  annotations: z.array(AnnotationSchema).optional(),
+});
 
 const SYSTEM_PROMPT = `You are a specialized Arabic-to-English translation engine for a Gulf Arabic commerce system.
 
@@ -72,7 +90,8 @@ export class OllamaTranslationLayer implements MSMLayer<TranslationOutput> {
       const latency = Math.round(performance.now() - start);
       let translatedText: string;
       try {
-        const parsed = JSON.parse(res.response);
+        const raw = JSON.parse(res.response);
+        const parsed = OutboundSchema.parse(raw);
         translatedText = parsed.translated_text || res.response;
       } catch {
         translatedText = res.response;
@@ -121,13 +140,10 @@ export class OllamaTranslationLayer implements MSMLayer<TranslationOutput> {
 
     const latency = Math.round(performance.now() - start);
 
-    let parsed: {
-      translated_text: string;
-      source_language: string;
-      annotations?: ContextAnnotation[];
-    };
+    let parsed: z.infer<typeof InboundSchema>;
     try {
-      parsed = JSON.parse(res.response);
+      const raw = JSON.parse(res.response);
+      parsed = InboundSchema.parse(raw);
     } catch {
       parsed = {
         translated_text: res.response,

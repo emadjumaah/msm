@@ -138,6 +138,29 @@ function json(res: ServerResponse, status: number, data: unknown) {
   res.end(JSON.stringify(data));
 }
 
+// ─── Rate Limiter (simple in-memory, per-IP) ────────────────
+
+const RATE_WINDOW_MS = 60_000; // 1 minute window
+const RATE_MAX_REQUESTS = 60; // 60 req/min per IP
+
+interface RateEntry {
+  count: number;
+  resetAt: number;
+}
+
+const rateBuckets = new Map<string, RateEntry>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  let entry = rateBuckets.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    entry = { count: 0, resetAt: now + RATE_WINDOW_MS };
+    rateBuckets.set(ip, entry);
+  }
+  entry.count++;
+  return entry.count > RATE_MAX_REQUESTS;
+}
+
 // ─── Server ──────────────────────────────────────────────────
 
 async function main() {
@@ -154,6 +177,16 @@ async function main() {
         "Access-Control-Allow-Headers": "Content-Type",
       });
       res.end();
+      return;
+    }
+
+    // Rate limiting
+    const clientIp =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
+      req.socket.remoteAddress ??
+      "unknown";
+    if (isRateLimited(clientIp)) {
+      json(res, 429, { error: "Too many requests. Try again later." });
       return;
     }
 
@@ -205,8 +238,10 @@ async function main() {
             latency_ms: e.latency_ms,
             status: e.status,
           })),
-          // Full payload available for debugging
-          payload: trace.payload,
+          // Full payload only when explicitly requested (contains all intermediate outputs)
+          ...(url.searchParams.get("debug") === "true" && {
+            payload: trace.payload,
+          }),
         });
       } catch (err) {
         json(res, 500, {

@@ -10,15 +10,7 @@
 
 import { resolve } from "node:path";
 import { loadManifest } from "./core/manifest.js";
-import { Pipeline } from "./core/pipeline.js";
-import {
-  DummyTranslationLayer,
-  DummyClassificationLayer,
-  DummyOrchestrationLayer,
-  DummyExecutionLayer,
-  DummyGenerationLayer,
-  DummyValidationLayer,
-} from "./dummy-models/index.js";
+import { createPipeline } from "./core/registry.js";
 
 const c = {
   reset: "\x1b[0m",
@@ -50,8 +42,10 @@ async function cmdValidate(manifestPath: string) {
     console.log(`  ${c.dim}Region:  ${manifest.region ?? "—"}${c.reset}`);
     console.log(`  ${c.dim}Layers:${c.reset}`);
     for (const [name, cfg] of Object.entries(manifest.layers)) {
+      const modelStr = cfg.model ?? cfg.provider;
+      const versionStr = cfg.version ?? "-";
       console.log(
-        `    ${c.cyan}${name.padEnd(16)}${c.reset}${cfg.model}@${cfg.version}${cfg.fine_tuned ? ` ${c.yellow}(fine-tuned)${c.reset}` : ""}`,
+        `    ${c.cyan}${name.padEnd(16)}${c.reset}${modelStr}@${versionStr}${cfg.fine_tuned ? ` ${c.yellow}(fine-tuned)${c.reset}` : ""}`,
       );
     }
   } catch (err) {
@@ -65,17 +59,7 @@ async function cmdValidate(manifestPath: string) {
 
 async function cmdTrace(manifestPath: string, inputText: string) {
   const absPath = resolve(manifestPath);
-  const manifest = await loadManifest(absPath);
-
-  const pipeline = new Pipeline();
-  pipeline.setManifest(manifest);
-  pipeline.register(new DummyTranslationLayer());
-  pipeline.register(new DummyClassificationLayer());
-  pipeline.register(new DummyOrchestrationLayer());
-  pipeline.register(new DummyExecutionLayer());
-  pipeline.register(new DummyGenerationLayer());
-  pipeline.register(new DummyValidationLayer());
-
+  const pipeline = await createPipeline(absPath);
   const trace = await pipeline.run({ raw: inputText, modality: "text" });
   console.log(JSON.stringify(trace.payload, null, 2));
 }
@@ -130,6 +114,8 @@ process.on("SIGINT", () => process.exit(130));
 process.on("SIGTERM", () => process.exit(143));
 
 main().catch((err) => {
-  console.error(`${c.red}${c.bold}Error:${c.reset} ${err instanceof Error ? err.message : String(err)}`);
+  console.error(
+    `${c.red}${c.bold}Error:${c.reset} ${err instanceof Error ? err.message : String(err)}`,
+  );
   process.exit(1);
 });
