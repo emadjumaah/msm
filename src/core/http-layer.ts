@@ -43,6 +43,7 @@ export abstract class HttpLayer<T extends LayerMeta> implements MSMLayer<T> {
   constructor(
     protected readonly endpoint: string,
     protected readonly timeoutMs: number = 10_000,
+    protected readonly maxRetries: number = 2,
   ) {}
 
   /** Build the JSON body sent to the model server. Override in subclass. */
@@ -55,30 +56,47 @@ export abstract class HttpLayer<T extends LayerMeta> implements MSMLayer<T> {
 
   async process(payload: MSMPayload): Promise<T> {
     const start = performance.now();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let lastError: Error | undefined;
 
-    try {
-      const res = await fetch(this.endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(this.buildRequestBody(payload)),
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      try {
+        const res = await fetch(this.endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-MSM-Trace-ID": payload.trace_id,
+            "X-MSM-Layer": this.name,
+          },
+          body: JSON.stringify(this.buildRequestBody(payload)),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(
+            `HTTP ${res.status}: ${body.length > 200 ? body.slice(0, 200) + "…" : body}`,
+          );
+        }
+
+        const json: unknown = await res.json();
+        const latency = Math.round(performance.now() - start);
+        return this.parseResponse(json, latency);
+      } catch (err) {
+        clearTimeout(timer);
+        lastError = err instanceof Error ? err : new Error(String(err));
+
+        // Don't retry on abort (timeout) or if we've exhausted attempts
+        if (attempt >= this.maxRetries || controller.signal.aborted) break;
       }
-
-      const json: unknown = await res.json();
-      const latency = Math.round(performance.now() - start);
-      return this.parseResponse(json, latency);
-    } catch (err) {
-      clearTimeout(timer);
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`HttpLayer(${this.endpoint}) failed: ${message}`);
-    } finally {
-      clearTimeout(timer);
     }
+
+    throw new Error(
+      `HttpLayer(${this.endpoint}) failed after ${this.maxRetries + 1} attempt(s): ${lastError!.message}`,
+    );
   }
 }

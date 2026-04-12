@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   LayerRegistry,
   getDefaultRegistry,
+  resetDefaultRegistry,
   createPipeline,
 } from "../src/core/registry.js";
 import type { LayerConfig } from "../src/core/manifest.js";
@@ -146,6 +147,29 @@ describe("LayerRegistry", () => {
       /produced a layer with name "classification"/,
     );
   });
+
+  it("throws on duplicate hook registration", () => {
+    const registry = new LayerRegistry();
+    const factory = () => ({
+      name: "test",
+      point: "before:classification" as const,
+      async process() {
+        return {
+          model_id: "x",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok" as const,
+          data: {},
+        };
+      },
+    });
+
+    registry.registerHook("test-provider", factory);
+    expect(() => registry.registerHook("test-provider", factory)).toThrow(
+      /Duplicate hook registration/,
+    );
+  });
 });
 
 // ─── Default Registry ────────────────────────────────────────
@@ -167,6 +191,13 @@ describe("getDefaultRegistry", () => {
       expect(providers).toContain("dummy");
       expect(providers).toContain("ollama");
     }
+  });
+
+  it("resetDefaultRegistry clears the cached singleton", async () => {
+    const r1 = await getDefaultRegistry();
+    resetDefaultRegistry();
+    const r2 = await getDefaultRegistry();
+    expect(r1).not.toBe(r2);
   });
 });
 

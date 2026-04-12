@@ -39,8 +39,13 @@ export class LayerRegistry {
     this.factories.set(key, factory);
   }
 
-  /** Register a hook factory for a provider name. */
+  /** Register a hook factory for a provider name. Throws on duplicate. */
   registerHook(provider: string, factory: HookFactory): void {
+    if (this.hookFactories.has(provider)) {
+      throw new Error(
+        `Duplicate hook registration: provider "${provider}" already registered.`,
+      );
+    }
     this.hookFactories.set(provider, factory);
   }
 
@@ -99,6 +104,11 @@ export class LayerRegistry {
 // ─── Default Registry (pre-loaded with built-in providers) ───
 
 let _default: LayerRegistry | null = null;
+
+/** Reset the cached default registry — useful for test isolation. */
+export function resetDefaultRegistry(): void {
+  _default = null;
+}
 
 export async function getDefaultRegistry(): Promise<LayerRegistry> {
   if (_default) return _default;

@@ -6,8 +6,8 @@ import { parse as parseYaml } from "yaml";
 
 const BaseLayerConfigSchema = z.object({
   provider: z.string().default("dummy"),
-  model: z.string(),
-  version: z.string(),
+  model: z.string().optional(),
+  version: z.string().optional(),
   fine_tuned: z.boolean().default(false),
   dataset: z.string().optional(),
   endpoint: z.string().optional(),
@@ -24,11 +24,9 @@ const OrchestrationLayerConfigSchema = BaseLayerConfigSchema.extend({
 const StandardLayerConfigSchema = BaseLayerConfigSchema.strict();
 
 /** Validates ISO 8601 date strings */
-const isoDateString = z
-  .string()
-  .refine((s) => !isNaN(Date.parse(s)), {
-    message: "Invalid date format — expected ISO 8601 (e.g. 2025-01-15)",
-  });
+const isoDateString = z.string().refine((s) => !isNaN(Date.parse(s)), {
+  message: "Invalid date format — expected ISO 8601 (e.g. 2025-01-15)",
+});
 
 const HOOK_POINTS = [
   "before:translation",
@@ -47,8 +45,8 @@ const HOOK_POINTS = [
 
 const HookConfigSchema = z.object({
   provider: z.string(),
-  model: z.string(),
-  version: z.string(),
+  model: z.string().optional(),
+  version: z.string().optional(),
   point: z.enum(HOOK_POINTS),
   endpoint: z.string().optional(),
   fine_tuned: z.boolean().default(false),
@@ -57,7 +55,9 @@ const HookConfigSchema = z.object({
 
 const ManifestSchema = z
   .object({
-    msm_version: z.string(),
+    msm_version: z.enum(["1.0"], {
+      errorMap: () => ({ message: 'Unsupported msm_version — expected "1.0"' }),
+    }),
     manifest_id: z.string(),
     domain: z.string(),
     region: z.string().optional(),

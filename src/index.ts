@@ -39,6 +39,7 @@ export { HttpLayer } from "./core/http-layer.js";
 export {
   LayerRegistry,
   getDefaultRegistry,
+  resetDefaultRegistry,
   createPipeline,
 } from "./core/registry.js";
 export type { LayerFactory, HookFactory } from "./core/registry.js";

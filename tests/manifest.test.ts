@@ -125,4 +125,43 @@ describe("Manifest Loader", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts manifest without model/version (optional for dummy providers)", () => {
+    const manifest = validateManifest({
+      msm_version: "1.0",
+      manifest_id: "minimal",
+      domain: "test",
+      created: "2026-01-01",
+      layers: {
+        translation: { provider: "dummy" },
+        classification: { provider: "dummy" },
+        orchestration: { provider: "dummy" },
+        execution: { provider: "dummy" },
+        generation: { provider: "dummy" },
+        validation: { provider: "dummy" },
+      },
+    });
+
+    expect(manifest.layers.translation.model).toBeUndefined();
+    expect(manifest.layers.translation.version).toBeUndefined();
+  });
+
+  it("rejects unsupported msm_version", () => {
+    expect(() =>
+      validateManifest({
+        msm_version: "2.0",
+        manifest_id: "test",
+        domain: "test",
+        created: "2026-01-01",
+        layers: {
+          translation: { provider: "dummy" },
+          classification: { provider: "dummy" },
+          orchestration: { provider: "dummy" },
+          execution: { provider: "dummy" },
+          generation: { provider: "dummy" },
+          validation: { provider: "dummy" },
+        },
+      }),
+    ).toThrow(/msm_version/i);
+  });
 });

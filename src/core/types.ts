@@ -112,6 +112,8 @@ export interface FinalOutput {
   text: string;
   language: string;
   total_latency_ms: number;
+  /** Aggregate pipeline health: "ok" if all layers succeeded, "degraded" if any failed but output was produced, "failed" if pipeline could not produce output */
+  pipeline_status: "ok" | "degraded" | "failed";
 }
 
 // ─── Full Payload ────────────────────────────────────────────
@@ -184,6 +186,8 @@ export interface MSMHook {
   name: string;
   /** When to run relative to the 6 core layers */
   point: HookPoint;
+  /** Which translation pass this hook applies to (default: "inbound") */
+  direction?: "inbound" | "outbound" | "both";
   /** Process the payload and return structured output */
   process(payload: MSMPayload): Promise<HookOutput>;
 }

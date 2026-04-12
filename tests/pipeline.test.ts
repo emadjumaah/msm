@@ -802,3 +802,133 @@ describe("Retry Feedback", () => {
     expect((feedbackSeen as { attempt: number }).attempt).toBe(1);
   });
 });
+
+// ─── Pipeline Status ─────────────────────────────────────────
+
+describe("Pipeline Status", () => {
+  it("reports 'ok' when all layers succeed", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+
+    expect(trace.payload.final_output?.pipeline_status).toBe("ok");
+  });
+
+  it("reports 'degraded' when a layer is missing", async () => {
+    const pipeline = new Pipeline();
+    pipeline.register(new DummyTranslationLayer());
+    // skip classification
+    pipeline.register(new DummyOrchestrationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+
+    expect(trace.payload.final_output?.pipeline_status).toBe("degraded");
+  });
+
+  it("reports 'degraded' when a layer throws", async () => {
+    const pipeline = buildPipeline();
+    const broken: MSMLayer = {
+      name: "orchestration",
+      async process(): Promise<never> {
+        throw new Error("model down");
+      },
+    };
+    pipeline.swap(broken);
+
+    const trace = await pipeline.run({ raw: "test", modality: "text" });
+
+    expect(trace.payload.final_output?.pipeline_status).toBe("degraded");
+  });
+});
+
+// ─── Hook Direction Filtering ────────────────────────────────
+
+describe("Hook Direction Filtering", () => {
+  it("inbound hooks do not fire during outbound translation pass", async () => {
+    const pipeline = buildPipeline();
+    let hookCallCount = 0;
+
+    const inboundOnlyHook: MSMHook = {
+      name: "inbound_hook",
+      point: "before:translation",
+      // direction defaults to "inbound"
+      async process(): Promise<HookOutput> {
+        hookCallCount++;
+        return {
+          model_id: "inbound-hook",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+          data: {},
+        };
+      },
+    };
+    pipeline.addHook(inboundOnlyHook);
+
+    // Arabic input triggers outbound translation
+    await pipeline.run({ raw: "ابي اطلب برغر", modality: "text" });
+
+    // Hook should fire once (inbound pass only), not twice
+    expect(hookCallCount).toBe(1);
+  });
+
+  it("outbound hooks fire only during outbound translation pass", async () => {
+    const pipeline = buildPipeline();
+    let hookCallCount = 0;
+
+    const outboundHook: MSMHook = {
+      name: "outbound_hook",
+      point: "after:translation",
+      direction: "outbound",
+      async process(): Promise<HookOutput> {
+        hookCallCount++;
+        return {
+          model_id: "outbound-hook",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+          data: {},
+        };
+      },
+    };
+    pipeline.addHook(outboundHook);
+
+    // Arabic input triggers outbound translation
+    await pipeline.run({ raw: "ابي اطلب برغر", modality: "text" });
+
+    // Hook should fire once (outbound pass only)
+    expect(hookCallCount).toBe(1);
+  });
+
+  it("'both' direction hooks fire on inbound and outbound passes", async () => {
+    const pipeline = buildPipeline();
+    let hookCallCount = 0;
+
+    const bothHook: MSMHook = {
+      name: "both_hook",
+      point: "before:translation",
+      direction: "both",
+      async process(): Promise<HookOutput> {
+        hookCallCount++;
+        return {
+          model_id: "both-hook",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+          data: {},
+        };
+      },
+    };
+    pipeline.addHook(bothHook);
+
+    await pipeline.run({ raw: "ابي اطلب برغر", modality: "text" });
+
+    // Hook should fire twice (once inbound, once outbound)
+    expect(hookCallCount).toBe(2);
+  });
+});

@@ -52,7 +52,32 @@ const FALLBACK_RESPONSE =
 
 // ─── Typed fallbacks per layer (downstream layers get valid shapes) ───
 
-function getLayerFallback(name: LayerName, error: string): LayerMeta {
+function getLayerFallback(
+  name: "translation",
+  error: string,
+): TranslationOutput;
+function getLayerFallback(
+  name: "classification",
+  error: string,
+): ClassificationOutput;
+function getLayerFallback(
+  name: "orchestration",
+  error: string,
+): OrchestrationOutput;
+function getLayerFallback(name: "execution", error: string): ExecutionOutput;
+function getLayerFallback(name: "generation", error: string): GenerationOutput;
+function getLayerFallback(name: "validation", error: string): ValidationOutput;
+function getLayerFallback(name: LayerName, error: string): LayerMeta;
+function getLayerFallback(
+  name: LayerName,
+  error: string,
+):
+  | TranslationOutput
+  | ClassificationOutput
+  | OrchestrationOutput
+  | ExecutionOutput
+  | GenerationOutput
+  | ValidationOutput {
   const base: LayerMeta = {
     model_id: "fallback",
     model_ver: "0.0.0",
@@ -71,7 +96,7 @@ function getLayerFallback(name: LayerName, error: string): LayerMeta {
         target_language: "en",
         layer_invoked: false,
         mode: "native",
-      } as unknown as LayerMeta;
+      } satisfies TranslationOutput;
     case "classification":
       return {
         ...base,
@@ -79,7 +104,7 @@ function getLayerFallback(name: LayerName, error: string): LayerMeta {
         domain: "general",
         urgency: "normal",
         routing_target: "unknown_workflow",
-      } as unknown as LayerMeta;
+      } satisfies ClassificationOutput;
     case "orchestration":
       return {
         ...base,
@@ -87,21 +112,21 @@ function getLayerFallback(name: LayerName, error: string): LayerMeta {
         tool_selections: [],
         estimated_steps: 1,
         mode: "rules",
-      } as unknown as LayerMeta;
+      } satisfies OrchestrationOutput;
     case "execution":
       return {
         ...base,
         tool_results: [],
         execution_status: "failed",
         errors: [error],
-      } as unknown as LayerMeta;
+      } satisfies ExecutionOutput;
     case "generation":
       return {
         ...base,
         response_text: FALLBACK_RESPONSE,
         tone: "neutral",
         word_count: FALLBACK_RESPONSE.split(/\s+/).length,
-      } as unknown as LayerMeta;
+      } satisfies GenerationOutput;
     case "validation":
       return {
         ...base,
@@ -109,7 +134,7 @@ function getLayerFallback(name: LayerName, error: string): LayerMeta {
         quality_score: 0,
         policy_violations: [],
         action: "release",
-      } as unknown as LayerMeta;
+      } satisfies ValidationOutput;
   }
 }
 
@@ -151,8 +176,13 @@ export class Pipeline {
     payload: MSMPayload,
     entries: TraceEntry[],
     hooks: MSMHook[],
+    direction: "inbound" | "outbound" = "inbound",
   ): Promise<void> {
-    const matching = hooks.filter((h) => h.point === point);
+    const matching = hooks.filter((h) => {
+      if (h.point !== point) return false;
+      const hookDir = h.direction ?? "inbound";
+      return hookDir === direction || hookDir === "both";
+    });
     if (matching.length === 0) return;
 
     // Run hooks sequentially in declaration order (spec §5.1)
@@ -221,10 +251,13 @@ export class Pipeline {
     ];
 
     let retries = 0;
-    let runFrom = 0; // index in order to start/restart from
+    let startIdx = 0;
+    let done = false;
 
-    while (runFrom < order.length) {
-      for (let i = runFrom; i < order.length; i++) {
+    while (!done) {
+      done = true; // assume we'll finish this pass
+
+      for (let i = startIdx; i < order.length; i++) {
         const name = order[i];
         const layer = layers.get(name);
 
@@ -289,7 +322,8 @@ export class Pipeline {
               attempt: retries,
             };
             // Re-run from generation layer
-            runFrom = order.indexOf("generation");
+            startIdx = order.indexOf("generation");
+            done = false;
             break;
           }
           if (!v.passed && v.action === "block") {
@@ -306,15 +340,6 @@ export class Pipeline {
             };
           }
         }
-
-        // If we've finished the last layer, exit
-        if (i === order.length - 1) {
-          runFrom = order.length; // exit while loop
-        }
-      }
-      // If the for-loop ran to completion for a retry, just break
-      if (runFrom < order.length && runFrom !== order.indexOf("generation")) {
-        break;
       }
     }
 
@@ -329,7 +354,13 @@ export class Pipeline {
       const translationLayer = layers.get("translation");
       if (translationLayer) {
         // Run before:translation hooks for outbound pass
-        await this.runHooks("before:translation", payload, entries, hooks);
+        await this.runHooks(
+          "before:translation",
+          payload,
+          entries,
+          hooks,
+          "outbound",
+        );
 
         let outboundResult: TranslationOutput;
         try {
@@ -351,7 +382,7 @@ export class Pipeline {
           outboundResult = getLayerFallback(
             "translation",
             err instanceof Error ? err.message : String(err),
-          ) as TranslationOutput;
+          );
         }
 
         payload.outbound_translation = outboundResult;
@@ -365,7 +396,13 @@ export class Pipeline {
         });
 
         // Run after:translation hooks for outbound pass
-        await this.runHooks("after:translation", payload, entries, hooks);
+        await this.runHooks(
+          "after:translation",
+          payload,
+          entries,
+          hooks,
+          "outbound",
+        );
       }
     }
 
@@ -379,10 +416,26 @@ export class Pipeline {
         ? outbound.translated_text
         : responseText;
 
+    // Compute aggregate pipeline status from core layer entries
+    const coreStatuses = entries
+      .filter(
+        (e) =>
+          !e.layer.startsWith("hook:") && e.layer !== "outbound_translation",
+      )
+      .map((e) => e.status);
+    const hasFailed = coreStatuses.some((s) => s === "failed");
+    const hasDegraded = coreStatuses.some((s) => s === "degraded");
+    const pipelineStatus: "ok" | "degraded" | "failed" = hasFailed
+      ? "degraded"
+      : hasDegraded
+        ? "degraded"
+        : "ok";
+
     payload.final_output = {
       text: finalText,
       language: inbound?.source_language ?? input.language ?? "en",
       total_latency_ms: totalLatency,
+      pipeline_status: pipelineStatus,
     } satisfies FinalOutput;
 
     return {
