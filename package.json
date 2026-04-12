@@ -1,0 +1,42 @@
+{
+  "name": "msm",
+  "version": "1.0.0",
+  "description": "MSM — Multi Small Models: An open standard for coordinated small model pipelines",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "msm": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/cli.ts",
+    "demo": "tsx src/demo.ts",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "ai",
+    "small-models",
+    "pipeline",
+    "msm",
+    "multi-small-models",
+    "arabic",
+    "commerce"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "vitest": "^3.1.0"
+  },
+  "dependencies": {
+    "yaml": "^2.7.0",
+    "zod": "^3.24.0"
+  }
+}

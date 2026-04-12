@@ -1,0 +1,46 @@
+msm_version: "1.0"
+manifest_id: "sports-booking-v1"
+domain: "sports-booking"
+region: "general"
+created: "2026-04-12"
+
+layers:
+  translation:
+    model: "nllb-200-600m"
+    version: "2.1"
+    fine_tuned: false
+    endpoint: "http://localhost:8001/translate"
+    mode: "translated"
+
+  classification:
+    model: "mdeberta-v3-sports"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "sports-intent-classification-v1"
+    endpoint: "http://localhost:8002/classify"
+
+  orchestration:
+    model: "qwen2.5-3b-sports"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "booking-workflows-v1"
+    endpoint: "http://localhost:8003/orchestrate"
+
+  execution:
+    model: "functionary-small-v3"
+    version: "1.1"
+    fine_tuned: false
+    endpoint: "http://localhost:8004/execute"
+
+  generation:
+    model: "qwen2.5-0.5b"
+    version: "2.0"
+    fine_tuned: true
+    dataset: "sports-brand-voice-v1"
+    endpoint: "http://localhost:8005/generate"
+
+  validation:
+    model: "minicheck"
+    version: "1.0"
+    fine_tuned: false
+    endpoint: "http://localhost:8006/validate"
