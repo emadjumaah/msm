@@ -61,6 +61,8 @@ If your problem is "I need GPT-4 to do X" → use LangChain. If your problem is 
 npm install msm-ai
 ```
 
+> **Note:** `npm install msm-ai` gives you the library for use in your own projects. The demo scripts, benchmarks, and CLI below require cloning the repo.
+
 ### Option A: Try instantly (no models needed)
 
 ```bash
@@ -611,6 +613,10 @@ pnpm benchmark:ollama        # dummy + Ollama side-by-side
 
 > Dummy models are instant (in-memory) — latency is 0ms. The value is in accuracy: 90% intent accuracy and 100% domain accuracy from simple keyword matching, proving the pipeline contracts work. Run `pnpm benchmark:ollama` to see real model latency and accuracy.
 
+### What to expect from Ollama
+
+With `qwen2.5:3b` on CPU, expect **800–2000ms per request** depending on hardware. On a Mac with Apple Silicon, closer to 400–800ms. The benchmark runner prints a side-by-side comparison so you can see exactly where the time goes (translation and generation are the heaviest layers).
+
 Results are saved to `benchmark-results.json` for programmatic use.
 
 ---
@@ -644,6 +650,7 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - [x] 8 domain manifests (food, healthcare, sports, legal, banking, education, e-commerce)
 - [ ] Production model examples (NLLB, Functionary)
 - [x] npm publish (`msm-ai` on npm)
+- [ ] Fine-tuning guide for domain-specific models
 - [ ] Web UI dashboard
 
 ## Philosophy
