@@ -16,6 +16,7 @@ import type {
   MSMHook,
   HookPoint,
   HookOutput,
+  PipelineIteration,
 } from "./types.js";
 import type { MSMManifest } from "./manifest.js";
 
@@ -48,6 +49,15 @@ export interface PipelineOptions {
   maxRetries?: number;
   /** AbortSignal for pipeline-level cancellation / timeout */
   signal?: AbortSignal;
+  /**
+   * Pipeline execution mode:
+   *   - "linear" (default): translate → classify → orchestrate → execute → generate → validate
+   *   - "iterative": translate → classify → [orchestrate → execute]* → generate → validate
+   *     The orchestrate→execute loop repeats until orchestration.action !== "use_tool"
+   */
+  mode?: "linear" | "iterative";
+  /** Max orchestrate→execute iterations in iterative mode (default: 6) */
+  maxIterations?: number;
 }
 
 // ─── Fallback response when pipeline cannot produce output ───
@@ -113,6 +123,7 @@ function getLayerFallback(
     case "orchestration":
       return {
         ...base,
+        action: "respond",
         workflow_steps: ["fallback_response"],
         tool_selections: [],
         estimated_steps: 1,
@@ -180,14 +191,19 @@ export class Pipeline {
   private hookNames = new Set<string>();
   private manifest: MSMManifest | null = null;
   private frozen = false;
-  private options: Required<Pick<PipelineOptions, "maxRetries">> & {
+  private options: Required<
+    Pick<PipelineOptions, "maxRetries" | "maxIterations">
+  > & {
     signal?: AbortSignal;
+    mode: "linear" | "iterative";
   };
 
   constructor(options?: PipelineOptions) {
     this.options = {
       maxRetries: options?.maxRetries ?? 1,
       signal: options?.signal,
+      mode: options?.mode ?? "linear",
+      maxIterations: options?.maxIterations ?? 6,
     };
   }
 
@@ -287,6 +303,61 @@ export class Pipeline {
     }
   }
 
+  /** Run a single layer with hooks, fallback, and trace recording */
+  private async runLayer(
+    name: LayerName,
+    payload: MSMPayload,
+    entries: TraceEntry[],
+    layers: Map<LayerName, MSMLayer>,
+    hooks: MSMHook[],
+    retries: number,
+  ): Promise<{ result: LayerMeta; usedFallback: boolean }> {
+    const layer = layers.get(name);
+
+    if (!layer) {
+      const fallback = getLayerFallback(name, `Layer "${name}" not registered`);
+      setLayerResult(payload, name, fallback);
+      entries.push({
+        layer: name,
+        model_id: fallback.model_id,
+        latency_ms: 0,
+        confidence: 0,
+        status: "failed",
+        error: fallback.error,
+        ...(retries > 0 ? { retry_attempt: retries } : {}),
+      });
+      return { result: fallback, usedFallback: true };
+    }
+
+    await this.runHooks(`before:${name}`, payload, entries, hooks);
+
+    let result: LayerMeta;
+    let usedFallback = false;
+    try {
+      result = await layer.process(payload);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      result = getLayerFallback(name, errMsg);
+      usedFallback = true;
+    }
+
+    setLayerResult(payload, name, result);
+
+    entries.push({
+      layer: name,
+      model_id: result.model_id,
+      latency_ms: result.latency_ms,
+      confidence: result.confidence,
+      status: result.status,
+      error: result.error,
+      ...(retries > 0 ? { retry_attempt: retries } : {}),
+    });
+
+    await this.runHooks(`after:${name}`, payload, entries, hooks);
+
+    return { result, usedFallback };
+  }
+
   /** Run the full pipeline */
   async run(input: MSMInput, sessionId?: string): Promise<PipelineTrace> {
     const traceId = randomUUID();
@@ -308,7 +379,166 @@ export class Pipeline {
       input,
     };
 
-    // Layer execution order
+    let usedFallbackGeneration = false;
+
+    const checkAbort = () => {
+      if (signal?.aborted) throw new Error("Pipeline aborted");
+    };
+
+    if (this.options.mode === "iterative") {
+      // ── Iterative Mode ─────────────────────────────────────
+      // System 2: translate → classify → [orchestrate → execute]* → generate → validate
+      //
+      // The orchestrate→execute loop repeats until the orchestration layer
+      // returns action !== "use_tool" (e.g. "respond", "clarify", "escalate", "delegate").
+      // This lets small models handle multi-tool tasks like dalil's reasoning loop.
+
+      checkAbort();
+      await this.runLayer("translation", payload, entries, layers, hooks, 0);
+
+      checkAbort();
+      await this.runLayer("classification", payload, entries, layers, hooks, 0);
+
+      // Orchestrate → Execute loop
+      payload.iterations = [];
+      let iterationsUsed = 0;
+
+      for (let iter = 0; iter < this.options.maxIterations; iter++) {
+        checkAbort();
+        const { result: orchResult, usedFallback: orchFallback } =
+          await this.runLayer(
+            "orchestration",
+            payload,
+            entries,
+            layers,
+            hooks,
+            0,
+          );
+
+        if (orchFallback) break; // orchestration failed entirely — proceed to generation
+
+        const orch = orchResult as OrchestrationOutput;
+        const action = orch.action ?? "respond"; // default to respond if no action
+        iterationsUsed++;
+
+        if (action !== "use_tool") {
+          // Terminal action — stop iterating
+          break;
+        }
+
+        // Execute the tool(s) selected by orchestration
+        checkAbort();
+        await this.runLayer("execution", payload, entries, layers, hooks, 0);
+
+        // Record iteration for orchestration context on next pass
+        payload.iterations.push({
+          orchestration: payload.orchestration!,
+          execution: payload.execution,
+        });
+      }
+
+      // Generate final response from accumulated context
+      checkAbort();
+      const genResult = await this.runLayer(
+        "generation",
+        payload,
+        entries,
+        layers,
+        hooks,
+        0,
+      );
+      if (genResult.usedFallback) usedFallbackGeneration = true;
+
+      // Validate
+      checkAbort();
+      const { result: valResult } = await this.runLayer(
+        "validation",
+        payload,
+        entries,
+        layers,
+        hooks,
+        0,
+      );
+      const v = valResult as ValidationOutput;
+
+      // Handle validation retry (re-run generation + validation only)
+      if (!v.passed && v.action === "retry") {
+        payload._validation_feedback = {
+          violations: v.policy_violations,
+          quality_score: v.quality_score,
+          attempt: 1,
+        };
+        checkAbort();
+        const retryGen = await this.runLayer(
+          "generation",
+          payload,
+          entries,
+          layers,
+          hooks,
+          1,
+        );
+        if (retryGen.usedFallback) usedFallbackGeneration = true;
+        checkAbort();
+        await this.runLayer("validation", payload, entries, layers, hooks, 1);
+      } else if (!v.passed && v.action === "block") {
+        payload.generation = {
+          response_text: FALLBACK_RESPONSE,
+          tone: "neutral",
+          word_count: FALLBACK_RESPONSE.split(/\s+/).length,
+          model_id: "fallback",
+          model_ver: "1.0.0",
+          latency_ms: 0,
+          confidence: 1.0,
+          status: "degraded",
+        };
+      }
+
+      // Build final output with iteration count
+      const totalLatency = Math.round(performance.now() - startTime);
+      const generation = payload.generation as GenerationOutput | undefined;
+      const responseText = generation?.response_text ?? FALLBACK_RESPONSE;
+
+      const coreStatuses = entries
+        .filter(
+          (e) =>
+            !e.layer.startsWith("hook:") && e.layer !== "outbound_translation",
+        )
+        .map((e) => e.status);
+      const hasFailed = coreStatuses.some((s) => s === "failed");
+      const hasDegraded = coreStatuses.some((s) => s === "degraded");
+      const pipelineStatus: "ok" | "degraded" | "failed" =
+        usedFallbackGeneration
+          ? "failed"
+          : hasFailed || hasDegraded
+            ? "degraded"
+            : "ok";
+
+      payload.final_output = {
+        text: responseText,
+        text_ar: generation?.response_text_ar,
+        language:
+          (payload.translation as TranslationOutput | undefined)
+            ?.source_language ??
+          input.language ??
+          "en",
+        total_latency_ms: totalLatency,
+        pipeline_status: pipelineStatus,
+        iterations_used: iterationsUsed,
+      } satisfies FinalOutput;
+
+      return {
+        trace_id: traceId,
+        session_id: sid,
+        timestamp: payload.timestamp,
+        total_latency_ms: totalLatency,
+        entries,
+        payload,
+      };
+    }
+
+    // ── Linear Mode (default) ────────────────────────────────
+    // System 1: translate → classify → orchestrate → execute → generate → validate
+
     const order: LayerName[] = [
       "translation",
       "classification",
@@ -321,67 +551,25 @@ export class Pipeline {
     let retries = 0;
     let startIdx = 0;
     let done = false;
-    let usedFallbackGeneration = false;
 
     while (!done) {
       done = true; // assume we'll finish this pass
 
       for (let i = startIdx; i < order.length; i++) {
-        // Check for pipeline-level cancellation
-        if (signal?.aborted) {
-          throw new Error("Pipeline aborted");
-        }
+        checkAbort();
 
         const name = order[i];
-        const layer = layers.get(name);
+        const { result, usedFallback } = await this.runLayer(
+          name,
+          payload,
+          entries,
+          layers,
+          hooks,
+          retries,
+        );
 
-        if (!layer) {
-          // Graceful degradation: typed fallback so downstream layers get valid shapes
-          const fallback = getLayerFallback(
-            name,
-            `Layer "${name}" not registered`,
-          );
-          setLayerResult(payload, name, fallback);
-          if (name === "generation") usedFallbackGeneration = true;
-          entries.push({
-            layer: name,
-            model_id: fallback.model_id,
-            latency_ms: 0,
-            confidence: 0,
-            status: "failed",
-            error: fallback.error,
-            ...(retries > 0 ? { retry_attempt: retries } : {}),
-          });
-          continue;
-        }
-
-        // Run before-hooks (sequential, declaration order per spec)
-        await this.runHooks(`before:${name}`, payload, entries, hooks);
-
-        let result: LayerMeta;
-        try {
-          result = await layer.process(payload);
-        } catch (err) {
-          // Graceful degradation: typed fallback preserves downstream contracts
-          const errMsg = err instanceof Error ? err.message : String(err);
-          result = getLayerFallback(name, errMsg);
-          if (name === "generation") usedFallbackGeneration = true;
-        }
-
-        setLayerResult(payload, name, result);
-
-        entries.push({
-          layer: name,
-          model_id: result.model_id,
-          latency_ms: result.latency_ms,
-          confidence: result.confidence,
-          status: result.status,
-          error: result.error,
-          ...(retries > 0 ? { retry_attempt: retries } : {}),
-        });
-
-        // Run after-hooks (sequential, declaration order per spec)
-        await this.runHooks(`after:${name}`, payload, entries, hooks);
+        if (usedFallback && name === "generation")
+          usedFallbackGeneration = true;
 
         // Handle validation gate
         if (name === "validation") {
@@ -392,20 +580,16 @@ export class Pipeline {
             retries < this.options.maxRetries
           ) {
             retries++;
-            // Feed validation feedback to generation on retry —
-            // so the model knows WHY the previous attempt was rejected
             payload._validation_feedback = {
               violations: v.policy_violations,
               quality_score: v.quality_score,
               attempt: retries,
             };
-            // Re-run from generation layer
             startIdx = order.indexOf("generation");
             done = false;
             break;
           }
           if (!v.passed && v.action === "block") {
-            // Blocked: replace generation output with fallback
             payload.generation = {
               response_text: FALLBACK_RESPONSE,
               tone: "neutral",
@@ -519,6 +703,7 @@ export class Pipeline {
 
     payload.final_output = {
       text: finalText,
+      text_ar: generation?.response_text_ar,
       language: inbound?.source_language ?? input.language ?? "en",
       total_latency_ms: totalLatency,
       pipeline_status: pipelineStatus,

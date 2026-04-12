@@ -13,6 +13,9 @@ import type {
   MSMPayload,
   ValidationOutput,
   GenerationOutput,
+  OrchestrationOutput,
+  ExecutionOutput,
+  OrchestrationAction,
   MSMHook,
   HookOutput,
 } from "../src/core/types.js";
@@ -1162,5 +1165,286 @@ describe("Tone type", () => {
 
     const validTones = ["warm", "neutral", "formal", "apologetic"];
     expect(validTones).toContain(trace.payload.generation?.tone);
+  });
+});
+
+// ─── Iterative Mode ──────────────────────────────────────────
+
+function buildIterativePipeline() {
+  const pipeline = new Pipeline({ mode: "iterative", maxIterations: 6 });
+  pipeline.register(new DummyTranslationLayer());
+  pipeline.register(new DummyClassificationLayer());
+  pipeline.register(new DummyOrchestrationLayer());
+  pipeline.register(new DummyExecutionLayer());
+  pipeline.register(new DummyGenerationLayer());
+  pipeline.register(new DummyValidationLayer());
+  return pipeline;
+}
+
+describe("Iterative Mode", () => {
+  it("runs translate → classify → [orchestrate → execute] → generate → validate", async () => {
+    const pipeline = buildIterativePipeline();
+    const trace = await pipeline.run({
+      raw: "I want to order a burger",
+      modality: "text",
+    });
+
+    // Should have all outputs
+    expect(trace.payload.translation).toBeDefined();
+    expect(trace.payload.classification).toBeDefined();
+    expect(trace.payload.orchestration).toBeDefined();
+    expect(trace.payload.execution).toBeDefined();
+    expect(trace.payload.generation).toBeDefined();
+    expect(trace.payload.validation).toBeDefined();
+    expect(trace.payload.final_output).toBeDefined();
+    expect(trace.payload.final_output?.iterations_used).toBeGreaterThan(0);
+  });
+
+  it("records iterations in payload.iterations", async () => {
+    const pipeline = buildIterativePipeline();
+    const trace = await pipeline.run({
+      raw: "I want to order a burger",
+      modality: "text",
+    });
+
+    // place_order intent → action "use_tool" → 1 iteration recorded, then "respond"
+    expect(trace.payload.iterations).toBeDefined();
+    expect(trace.payload.iterations!.length).toBeGreaterThanOrEqual(1);
+    expect(trace.payload.iterations![0].orchestration).toBeDefined();
+    expect(trace.payload.iterations![0].execution).toBeDefined();
+  });
+
+  it("stops iterating when action is 'respond'", async () => {
+    const pipeline = new Pipeline({ mode: "iterative", maxIterations: 6 });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    // Custom orchestration: respond immediately (no tools)
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "respond",
+          workflow_steps: ["direct_response"],
+          tool_selections: [],
+          estimated_steps: 1,
+          mode: "rules",
+          model_id: "test",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
+
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+
+    // No iterations — went straight to respond
+    expect(trace.payload.iterations).toEqual([]);
+    expect(trace.payload.final_output?.iterations_used).toBe(1);
+  });
+
+  it("loops multiple times when orchestration keeps saying use_tool", async () => {
+    let orchCalls = 0;
+    const pipeline = new Pipeline({ mode: "iterative", maxIterations: 4 });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        orchCalls++;
+        // First 2 calls: use_tool. Third call: respond.
+        const action: OrchestrationAction =
+          orchCalls < 3 ? "use_tool" : "respond";
+        return {
+          action,
+          workflow_steps: [`step_${orchCalls}`],
+          tool_selections: orchCalls < 3 ? ["test_api"] : [],
+          estimated_steps: 1,
+          mode: "llm",
+          model_id: "test",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 0.9,
+          status: "ok",
+          reasoning: `iteration ${orchCalls}`,
+        };
+      },
+    });
+
+    const trace = await pipeline.run({ raw: "complex task", modality: "text" });
+
+    expect(orchCalls).toBe(3); // 2 tool iterations + 1 final respond
+    expect(trace.payload.iterations!.length).toBe(2); // 2 recorded iterations
+    expect(trace.payload.final_output?.iterations_used).toBe(3);
+  });
+
+  it("respects maxIterations limit", async () => {
+    let orchCalls = 0;
+    const pipeline = new Pipeline({ mode: "iterative", maxIterations: 2 });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        orchCalls++;
+        return {
+          action: "use_tool", // always wants more tools
+          workflow_steps: [`step_${orchCalls}`],
+          tool_selections: ["test_api"],
+          estimated_steps: 1,
+          mode: "llm",
+          model_id: "test",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 0.9,
+          status: "ok",
+        };
+      },
+    });
+
+    const trace = await pipeline.run({
+      raw: "infinite task",
+      modality: "text",
+    });
+
+    // Should stop at maxIterations even though orchestration keeps requesting tools
+    expect(orchCalls).toBe(2);
+    expect(trace.payload.generation).toBeDefined();
+    expect(trace.payload.final_output).toBeDefined();
+  });
+
+  it("handles escalate action from orchestration", async () => {
+    const pipeline = new Pipeline({ mode: "iterative" });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "escalate",
+          workflow_steps: ["escalate_to_human"],
+          tool_selections: [],
+          estimated_steps: 0,
+          mode: "llm",
+          model_id: "test",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 0.95,
+          status: "ok",
+          reasoning: "User is angry, escalating to human",
+        };
+      },
+    });
+
+    const trace = await pipeline.run({
+      raw: "I want my money back NOW",
+      modality: "text",
+    });
+
+    // Should NOT have any execution (no tool calls needed)
+    // iterations should be empty (didn't loop)
+    expect(trace.payload.iterations).toEqual([]);
+    expect(trace.payload.orchestration?.action).toBe("escalate");
+    expect(trace.payload.generation).toBeDefined();
+    expect(trace.payload.final_output).toBeDefined();
+  });
+
+  it("AbortSignal works in iterative mode", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const pipeline = new Pipeline({
+      mode: "iterative",
+      signal: controller.signal,
+    });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyOrchestrationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    await expect(
+      pipeline.run({ raw: "hello", modality: "text" }),
+    ).rejects.toThrow("Pipeline aborted");
+  });
+
+  it("greeting in iterative mode skips tool loop (action=respond)", async () => {
+    const pipeline = buildIterativePipeline();
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+
+    // Greeting → orchestration says "respond" → no iterations
+    expect(trace.payload.classification?.intent).toBe("greeting");
+    expect(trace.payload.orchestration?.action).toBe("respond");
+    expect(trace.payload.iterations).toEqual([]);
+  });
+
+  it("tool_params passed through orchestration", async () => {
+    const pipeline = new Pipeline({ mode: "iterative" });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
+
+    let callCount = 0;
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            action: "use_tool",
+            workflow_steps: ["book_appointment"],
+            tool_selections: ["booking_api"],
+            tool_params: { date: "2026-04-15", service: "haircut" },
+            estimated_steps: 1,
+            mode: "llm",
+            model_id: "test",
+            model_ver: "1.0",
+            latency_ms: 0,
+            confidence: 0.9,
+            status: "ok",
+          };
+        }
+        return {
+          action: "respond",
+          workflow_steps: [],
+          tool_selections: [],
+          estimated_steps: 0,
+          mode: "llm",
+          model_id: "test",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 0.9,
+          status: "ok",
+        };
+      },
+    });
+
+    const trace = await pipeline.run({ raw: "book haircut", modality: "text" });
+
+    // First iteration should have tool_params
+    expect(trace.payload.iterations![0].orchestration.tool_params).toEqual({
+      date: "2026-04-15",
+      service: "haircut",
+    });
   });
 });

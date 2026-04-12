@@ -63,6 +63,14 @@ const ManifestSchema = z
     region: z.string().optional(),
     created: isoDateString,
 
+    /** Pipeline execution configuration */
+    pipeline: z
+      .object({
+        mode: z.enum(["linear", "iterative"]).default("linear"),
+        max_iterations: z.number().int().min(1).max(20).default(6),
+      })
+      .optional(),
+
     layers: z
       .object({
         translation: TranslationLayerConfigSchema,

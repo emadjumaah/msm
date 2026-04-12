@@ -65,12 +65,26 @@ export interface ClassificationOutput extends LayerMeta {
 
 export type OrchestrationMode = "rules" | "llm" | "hybrid";
 
+/** In iterative mode, orchestration decides the next action each iteration */
+export type OrchestrationAction =
+  | "use_tool"
+  | "respond"
+  | "clarify"
+  | "escalate"
+  | "delegate";
+
 export interface OrchestrationOutput extends LayerMeta {
+  /** Next action — required in iterative mode, optional in linear */
+  action?: OrchestrationAction;
   workflow_steps: string[];
   tool_selections: string[];
+  /** Parameters for the current tool call (iterative mode) */
+  tool_params?: Record<string, unknown>;
   estimated_steps: number;
   /** How the workflow was resolved: rules, llm, or hybrid (rules + llm fallback) */
   mode: OrchestrationMode;
+  /** Chain-of-thought reasoning for the decision */
+  reasoning?: string;
 }
 
 // ─── Layer 4: Execution ──────────────────────────────────────
@@ -93,6 +107,8 @@ export type Tone = "warm" | "neutral" | "formal" | "apologetic";
 
 export interface GenerationOutput extends LayerMeta {
   response_text: string;
+  /** Bilingual response — secondary language (e.g. Arabic) */
+  response_text_ar?: string;
   tone: Tone;
   word_count: number;
 }
@@ -112,10 +128,21 @@ export interface ValidationOutput extends LayerMeta {
 
 export interface FinalOutput {
   text: string;
+  /** Bilingual text — secondary language, if generation provided it */
+  text_ar?: string;
   language: string;
   total_latency_ms: number;
   /** Aggregate pipeline health: "ok" if all layers succeeded, "degraded" if any failed but output was produced, "failed" if pipeline could not produce output */
   pipeline_status: "ok" | "degraded" | "failed";
+  /** Number of orchestrate→execute iterations (iterative mode only) */
+  iterations_used?: number;
+}
+
+// ─── Iteration Record (iterative pipelines) ─────────────────
+
+export interface PipelineIteration {
+  orchestration: OrchestrationOutput;
+  execution?: ExecutionOutput;
 }
 
 // ─── Full Payload ────────────────────────────────────────────
@@ -136,6 +163,9 @@ export interface MSMPayload {
   /** Outbound translation: English response → user's language */
   outbound_translation?: TranslationOutput;
   final_output?: FinalOutput;
+
+  /** Past orchestrate→execute iterations (iterative mode) */
+  iterations?: PipelineIteration[];
 
   /** Hook outputs keyed by hook name (domain-specific extensions) */
   hooks?: Record<string, HookOutput>;

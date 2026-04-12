@@ -164,4 +164,44 @@ describe("Manifest Loader", () => {
       }),
     ).toThrow(/msm_version/i);
   });
+
+  it("accepts pipeline config with mode and max_iterations", () => {
+    const manifest = validateManifest({
+      msm_version: "1.0",
+      manifest_id: "brain",
+      domain: "support",
+      created: "2026-04-13",
+      pipeline: { mode: "iterative", max_iterations: 4 },
+      layers: {
+        translation: { provider: "dummy" },
+        classification: { provider: "dummy" },
+        orchestration: { provider: "dummy" },
+        execution: { provider: "dummy" },
+        generation: { provider: "dummy" },
+        validation: { provider: "dummy" },
+      },
+    });
+    expect(manifest.pipeline?.mode).toBe("iterative");
+    expect(manifest.pipeline?.max_iterations).toBe(4);
+  });
+
+  it("defaults pipeline mode to linear", () => {
+    const manifest = validateManifest({
+      msm_version: "1.0",
+      manifest_id: "fast",
+      domain: "food",
+      created: "2026-04-13",
+      pipeline: {},
+      layers: {
+        translation: { provider: "dummy" },
+        classification: { provider: "dummy" },
+        orchestration: { provider: "dummy" },
+        execution: { provider: "dummy" },
+        generation: { provider: "dummy" },
+        validation: { provider: "dummy" },
+      },
+    });
+    expect(manifest.pipeline?.mode).toBe("linear");
+    expect(manifest.pipeline?.max_iterations).toBe(6);
+  });
 });
