@@ -28,14 +28,14 @@ User Input (any language)
 
 LangChain and LlamaIndex are **orchestration libraries** — they help you call one large model in flexible ways. MSM is a **pipeline standard** — it replaces the one large model with six small specialized ones.
 
-| | LangChain / LlamaIndex | MSM |
-| --- | --- | --- |
-| Core idea | Orchestrate one LLM | Replace LLM with specialized pipeline |
-| Model coupling | Tied to provider APIs | Any model behind a standard contract |
-| Swap a model | Change code + prompts | Change one line in manifest YAML |
-| Language support | Depends on the LLM | Dedicated Translation Layer (any language) |
-| Auditability | Prompt chains | Per-layer trace with confidence scores |
-| Cost | LLM pricing | 10-20x cheaper (small models) |
+|                  | LangChain / LlamaIndex | MSM                                        |
+| ---------------- | ---------------------- | ------------------------------------------ |
+| Core idea        | Orchestrate one LLM    | Replace LLM with specialized pipeline      |
+| Model coupling   | Tied to provider APIs  | Any model behind a standard contract       |
+| Swap a model     | Change code + prompts  | Change one line in manifest YAML           |
+| Language support | Depends on the LLM     | Dedicated Translation Layer (any language) |
+| Auditability     | Prompt chains          | Per-layer trace with confidence scores     |
+| Cost             | LLM pricing            | 10-20x cheaper (small models)              |
 
 If your problem is "I need GPT-4 to do X" → use LangChain. If your problem is "I need a production AI system that's cheap, fast, auditable, and works in Arabic" → use MSM.
 
@@ -134,7 +134,7 @@ layers:
     provider: ollama # ← which implementation to use
     model: "qwen2.5:3b" # ← which model
     version: "1.0.0"
-    mode: "translated"     # "translated" = translate non-English, "native" = English passthrough
+    mode: "translated" # "translated" = translate non-English, "native" = English passthrough
 
   classification:
     provider: ollama
@@ -436,12 +436,42 @@ Response:
   "trace_id": "9f53fe56-...",
   "total_latency_ms": 3,
   "layers": [
-    { "layer": "translation",    "model_id": "dummy-translation-v1",    "latency_ms": 0, "status": "ok" },
-    { "layer": "classification",  "model_id": "dummy-classification-v1",  "latency_ms": 0, "status": "ok" },
-    { "layer": "orchestration",   "model_id": "dummy-orchestration-v1",   "latency_ms": 0, "status": "ok" },
-    { "layer": "execution",       "model_id": "dummy-execution-v1",       "latency_ms": 0, "status": "ok" },
-    { "layer": "generation",      "model_id": "dummy-generation-v1",      "latency_ms": 0, "status": "ok" },
-    { "layer": "validation",      "model_id": "dummy-validation-v1",      "latency_ms": 0, "status": "ok" }
+    {
+      "layer": "translation",
+      "model_id": "dummy-translation-v1",
+      "latency_ms": 0,
+      "status": "ok"
+    },
+    {
+      "layer": "classification",
+      "model_id": "dummy-classification-v1",
+      "latency_ms": 0,
+      "status": "ok"
+    },
+    {
+      "layer": "orchestration",
+      "model_id": "dummy-orchestration-v1",
+      "latency_ms": 0,
+      "status": "ok"
+    },
+    {
+      "layer": "execution",
+      "model_id": "dummy-execution-v1",
+      "latency_ms": 0,
+      "status": "ok"
+    },
+    {
+      "layer": "generation",
+      "model_id": "dummy-generation-v1",
+      "latency_ms": 0,
+      "status": "ok"
+    },
+    {
+      "layer": "validation",
+      "model_id": "dummy-validation-v1",
+      "latency_ms": 0,
+      "status": "ok"
+    }
   ]
 }
 ```
