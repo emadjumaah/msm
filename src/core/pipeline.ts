@@ -159,11 +159,11 @@ export class Pipeline {
     for (const hook of matching) {
       let result: HookOutput;
       try {
-        // Pass a frozen snapshot to prevent hooks from mutating payload
-        result = await hook.process(payload);
+        // Deep-clone so hooks cannot mutate the live payload
+        const snapshot = structuredClone(payload);
+        result = await hook.process(snapshot);
       } catch (err) {
-        const errMsg =
-          err instanceof Error ? err.message : String(err);
+        const errMsg = err instanceof Error ? err.message : String(err);
         result = {
           model_id: "hook-error",
           model_ver: "0.0.0",
@@ -281,6 +281,13 @@ export class Pipeline {
             retries < this.options.maxRetries
           ) {
             retries++;
+            // Feed validation feedback to generation on retry —
+            // so the model knows WHY the previous attempt was rejected
+            payload._validation_feedback = {
+              violations: v.policy_violations,
+              quality_score: v.quality_score,
+              attempt: retries,
+            };
             // Re-run from generation layer
             runFrom = order.indexOf("generation");
             break;

@@ -570,8 +570,12 @@ describe("Outbound Translation", () => {
     // Final output should be in the user's language
     expect(trace.payload.final_output?.language).toBe("ar-gulf");
     // Outbound translation should produce non-empty Arabic text
-    expect(trace.payload.outbound_translation?.translated_text).toEqual(expect.any(String));
-    expect(trace.payload.outbound_translation!.translated_text!.length).toBeGreaterThan(0);
+    expect(trace.payload.outbound_translation?.translated_text).toEqual(
+      expect.any(String),
+    );
+    expect(
+      trace.payload.outbound_translation!.translated_text!.length,
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -697,5 +701,104 @@ describe("Sequential Hook Execution", () => {
     expect(trace.payload.hooks?.["hook_b"]).toBeDefined();
     // Sequential: a completes before b starts (declaration order per spec)
     expect(executionOrder).toEqual(["a_start", "a_end", "b_start", "b_end"]);
+  });
+});
+
+// ─── Hook Isolation ──────────────────────────────────────────
+
+describe("Hook Isolation", () => {
+  it("hooks receive a snapshot — cannot mutate the live payload", async () => {
+    const pipeline = buildPipeline();
+
+    const mutatingHook: MSMHook = {
+      name: "mutator",
+      point: "after:translation",
+      async process(payload: MSMPayload): Promise<HookOutput> {
+        // Attempt to corrupt the payload
+        (payload as Record<string, unknown>).input = {
+          raw: "HACKED",
+          modality: "text",
+        };
+        return {
+          model_id: "mutator",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+          data: {},
+        };
+      },
+    };
+    pipeline.addHook(mutatingHook);
+
+    const trace = await pipeline.run({
+      raw: "ابي اطلب برغر",
+      modality: "text",
+    });
+
+    // The real payload input should be untouched
+    expect(trace.payload.input.raw).toBe("ابي اطلب برغر");
+  });
+});
+
+// ─── Retry Feedback ──────────────────────────────────────────
+
+describe("Retry Feedback", () => {
+  it("injects validation violations on retry so generation can adapt", async () => {
+    let feedbackSeen: unknown = undefined;
+
+    const pipeline = new Pipeline({ maxRetries: 1 });
+    pipeline.register(new DummyTranslationLayer());
+    pipeline.register(new DummyClassificationLayer());
+    pipeline.register(new DummyOrchestrationLayer());
+    pipeline.register(new DummyExecutionLayer());
+
+    const spyGen: MSMLayer<GenerationOutput> = {
+      name: "generation",
+      async process(payload: MSMPayload): Promise<GenerationOutput> {
+        feedbackSeen = payload._validation_feedback;
+        return {
+          response_text: "Generated response",
+          tone: "warm",
+          word_count: 2,
+          model_id: "spy-gen",
+          model_ver: "1.0.0",
+          latency_ms: 0,
+          confidence: 0.9,
+          status: "ok",
+        };
+      },
+    };
+    pipeline.register(spyGen);
+
+    let validationCalls = 0;
+    const retryValidator: MSMLayer<ValidationOutput> = {
+      name: "validation",
+      async process(): Promise<ValidationOutput> {
+        validationCalls++;
+        const pass = validationCalls > 1;
+        return {
+          passed: pass,
+          quality_score: pass ? 0.9 : 0.1,
+          policy_violations: pass ? [] : ["toxic_content"],
+          action: pass ? "release" : "retry",
+          model_id: "retry-val",
+          model_ver: "1.0.0",
+          latency_ms: 0,
+          confidence: 0.9,
+          status: "ok",
+        };
+      },
+    };
+    pipeline.register(retryValidator);
+
+    await pipeline.run({ raw: "hello", modality: "text" });
+
+    // On the retry call, generation should have seen the feedback
+    expect(feedbackSeen).toBeDefined();
+    expect((feedbackSeen as { violations: string[] }).violations).toContain(
+      "toxic_content",
+    );
+    expect((feedbackSeen as { attempt: number }).attempt).toBe(1);
   });
 });

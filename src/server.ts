@@ -86,21 +86,47 @@ async function buildPipeline(): Promise<{ pipeline: Pipeline; label: string }> {
 
 // ─── Helpers ─────────────────────────────────────────────────
 
+const READ_TIMEOUT_MS = 10_000; // 10s inactivity timeout
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        req.destroy();
+        reject(new Error("Request body read timed out"));
+      }
+    }, READ_TIMEOUT_MS);
+
     req.on("data", (c: Buffer) => {
       size += c.length;
       if (size > MAX_BODY_BYTES) {
+        settled = true;
+        clearTimeout(timer);
         req.destroy();
         reject(new Error(`Request body exceeds ${MAX_BODY_BYTES} bytes`));
         return;
       }
       chunks.push(c);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString()));
-    req.on("error", reject);
+    req.on("end", () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(Buffer.concat(chunks).toString());
+      }
+    });
+    req.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
   });
 }
 

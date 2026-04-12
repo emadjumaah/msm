@@ -135,6 +135,13 @@ export interface MSMPayload {
 
   /** Hook outputs keyed by hook name (domain-specific extensions) */
   hooks?: Record<string, HookOutput>;
+
+  /** Validation feedback injected on retry — tells generation WHY the previous attempt failed */
+  _validation_feedback?: {
+    violations: string[];
+    quality_score: number;
+    attempt: number;
+  };
 }
 
 // ─── Layer Interface ─────────────────────────────────────────
