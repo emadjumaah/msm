@@ -9,13 +9,16 @@ import type {
   GenerationOutput,
   ValidationOutput,
   FinalOutput,
+  MSMHook,
+  HookPoint,
+  HookOutput,
 } from "./types.js";
 import type { MSMManifest } from "./manifest.js";
 
 // ─── Trace ───────────────────────────────────────────────────
 
 export interface TraceEntry {
-  layer: LayerName;
+  layer: LayerName | string; // string for hooks (e.g. "hook:image_recognition")
   model_id: string;
   latency_ms: number;
   confidence: number;
@@ -48,6 +51,7 @@ const FALLBACK_RESPONSE =
 
 export class Pipeline {
   private layers = new Map<LayerName, MSMLayer>();
+  private hooks: MSMHook[] = [];
   private manifest: MSMManifest | null = null;
   private options: Required<PipelineOptions>;
 
@@ -65,9 +69,51 @@ export class Pipeline {
     this.layers.set(layer.name, layer);
   }
 
+  /** Add a hook — runs before or after a core layer */
+  addHook(hook: MSMHook): void {
+    this.hooks.push(hook);
+  }
+
   /** Attach a manifest for metadata */
   setManifest(manifest: MSMManifest): void {
     this.manifest = manifest;
+  }
+
+  /** Run all hooks for a given point, recording results in payload and trace */
+  private async runHooks(
+    point: HookPoint,
+    payload: MSMPayload,
+    entries: TraceEntry[],
+  ): Promise<void> {
+    const matching = this.hooks.filter((h) => h.point === point);
+    for (const hook of matching) {
+      let result: HookOutput;
+      try {
+        result = await hook.process(payload);
+      } catch (err) {
+        result = {
+          model_id: "hook-error",
+          model_ver: "0.0.0",
+          latency_ms: 0,
+          confidence: 0,
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+          data: {},
+        };
+      }
+      // Store hook output in payload
+      if (!payload.hooks) payload.hooks = {};
+      payload.hooks[hook.name] = result;
+
+      entries.push({
+        layer: `hook:${hook.name}`,
+        model_id: result.model_id,
+        latency_ms: result.latency_ms,
+        confidence: result.confidence,
+        status: result.status,
+        error: result.error,
+      });
+    }
   }
 
   /** Run the full pipeline */
@@ -125,6 +171,9 @@ export class Pipeline {
           continue;
         }
 
+        // Run before-hooks
+        await this.runHooks(`before:${name}`, payload, entries);
+
         let result: LayerMeta;
         try {
           result = await layer.process(payload);
@@ -150,6 +199,9 @@ export class Pipeline {
           status: result.status,
           error: result.error,
         });
+
+        // Run after-hooks
+        await this.runHooks(`after:${name}`, payload, entries);
 
         // Handle validation gate
         if (name === "validation") {

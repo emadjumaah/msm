@@ -19,6 +19,9 @@ export type {
   MSMLayer,
   ToolResult,
   ValidationAction,
+  HookPoint,
+  HookOutput,
+  MSMHook,
 } from "./core/types.js";
 
 export { Pipeline } from "./core/pipeline.js";
@@ -28,9 +31,18 @@ export type {
   PipelineOptions,
 } from "./core/pipeline.js";
 export { loadManifest, validateManifest } from "./core/manifest.js";
-export type { MSMManifest, LayerConfig } from "./core/manifest.js";
+export type { MSMManifest, LayerConfig, HookConfig } from "./core/manifest.js";
 export { HttpLayer } from "./core/http-layer.js";
 
+// Registry — build pipelines from manifests (like docker compose)
+export {
+  LayerRegistry,
+  getDefaultRegistry,
+  createPipeline,
+} from "./core/registry.js";
+export type { LayerFactory, HookFactory } from "./core/registry.js";
+
+// Dummy models — for testing, prototyping, and offline use
 export {
   DummyTranslationLayer,
   DummyClassificationLayer,
@@ -39,3 +51,11 @@ export {
   DummyGenerationLayer,
   DummyValidationLayer,
 } from "./dummy-models/index.js";
+
+// Ollama models — real LLM layers via local Ollama server
+export {
+  OllamaTranslationLayer,
+  OllamaClassificationLayer,
+  OllamaOrchestrationLayer,
+  OllamaGenerationLayer,
+} from "./ollama-layers/index.js";

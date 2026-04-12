@@ -20,15 +20,17 @@
 4. [Layer Contracts](#4-layer-contracts)
 5. [Internal Payload Format](#5-internal-payload-format)
 6. [Manifest Schema](#6-manifest-schema)
-7. [Recommended Model Candidates](#7-recommended-model-candidates)
-8. [Dummy Model Strategy](#8-dummy-model-strategy)
-9. [Swap Mechanism](#9-swap-mechanism)
-10. [Evaluation Criteria](#10-evaluation-criteria)
-11. [Business Contract](#11-business-contract)
-12. [Domain Expansion Path](#12-domain-expansion-path)
-13. [Open Source Strategy](#13-open-source-strategy)
-14. [Milestones](#14-milestones)
-15. [Glossary](#15-glossary)
+7. [Hooks](#7-hooks)
+8. [Layer Registry & createPipeline](#8-layer-registry--createpipeline)
+9. [Recommended Model Candidates](#9-recommended-model-candidates)
+10. [Dummy Model Strategy](#10-dummy-model-strategy)
+11. [Swap Mechanism](#11-swap-mechanism)
+12. [Evaluation Criteria](#12-evaluation-criteria)
+13. [Business Contract](#13-business-contract)
+14. [Domain Expansion Path](#14-domain-expansion-path)
+15. [Open Source Strategy](#15-open-source-strategy)
+16. [Milestones](#16-milestones)
+17. [Glossary](#17-glossary)
 
 ---
 
@@ -383,6 +385,17 @@ All layers communicate via a single JSON payload that accumulates results as it 
     "status": "ok"
   },
 
+  "hooks": {
+    "image_analysis": {
+      "model_id": "medclip-v1",
+      "model_ver": "1.0",
+      "latency_ms": 200,
+      "confidence": 0.92,
+      "status": "ok",
+      "data": { "findings": ["...domain-specific results..."] }
+    }
+  },
+
   "final_output": {
     "text": "تم تأكيد طلبك! التوصيل خلال 30 دقيقة تقريباً.",
     "language": "ar-gulf",
@@ -408,6 +421,7 @@ created: "2026-04-01"
 
 layers:
   translation:
+    provider: "ollama" # which backend serves this layer
     model: "nllb-200-600m"
     version: "2.1"
     fine_tuned: true
@@ -415,6 +429,7 @@ layers:
     languages: ["ar-gulf", "ar-msa", "en"]
 
   classification:
+    provider: "ollama"
     model: "mdeberta-v3"
     version: "1.4"
     fine_tuned: true
@@ -422,18 +437,21 @@ layers:
     intents: ["place_order", "track_order", "cancel", "inquiry", "complaint"]
 
   orchestration:
+    provider: "ollama"
     model: "qwen2.5-3b"
     version: "3.0"
     fine_tuned: true
     dataset: "food-workflows-v5"
 
   execution:
+    provider: "dummy" # no real model yet — use dummy
     model: "functionary-small-v3"
     version: "1.1"
     fine_tuned: false
     tools: ["maps_api", "restaurant_api", "order_api", "payment_api"]
 
   generation:
+    provider: "ollama"
     model: "qwen2.5-0.5b"
     version: "2.0"
     fine_tuned: true
@@ -441,17 +459,181 @@ layers:
     tone: "warm"
 
   validation:
+    provider: "dummy"
     model: "minicheck"
     version: "1.0"
     fine_tuned: false
     policy: "food-commerce-policy-v2"
+
+hooks: # optional domain-specific extensions
+  drug_interaction_check:
+    provider: "http"
+    model: "drug-interaction-v2"
+    point: "after:generation" # runs after generation, before validation
 ```
 
 > **Key Promise:** Any layer model can be swapped by updating the manifest and reloading. No other layers are affected. This is the core contract of MSM.
 
+### 6.1 The `provider` Field
+
+Every layer in a manifest must declare a `provider` — the backend that serves that layer. Built-in providers:
+
+| Provider | Description                                                            |
+| -------- | ---------------------------------------------------------------------- |
+| `dummy`  | In-memory dummy models for testing and development                     |
+| `ollama` | Local Ollama instance (default: `http://localhost:11434`)              |
+| `http`   | Generic HTTP endpoint — the layer sends requests to the configured URL |
+
+Custom providers can be registered at runtime via the Layer Registry (see Section 8). The `provider` field defaults to `"dummy"` if omitted.
+
 ---
 
-## 7. Recommended Model Candidates
+## 7. Hooks
+
+Hooks extend the pipeline for domain-specific needs without changing core layers. A hook runs at a specific **hook point** — before or after any of the six core layers — and appends its output to the `payload.hooks` map.
+
+### 7.1 Hook Points
+
+Twelve hook points are available:
+
+```
+before:translation    after:translation
+before:classification after:classification
+before:orchestration  after:orchestration
+before:execution      after:execution
+before:generation     after:generation
+before:validation     after:validation
+```
+
+### 7.2 Hook Interface
+
+Every hook must implement:
+
+```typescript
+interface MSMHook {
+  name: string; // unique identifier
+  point: HookPoint; // e.g. "before:classification"
+  process(payload: MSMPayload): Promise<HookOutput>;
+}
+```
+
+Hook output includes the standard `LayerMeta` fields plus an arbitrary `data` record:
+
+```json
+{
+  "model_id": "medclip-v1",
+  "model_ver": "1.0",
+  "latency_ms": 200,
+  "confidence": 0.92,
+  "status": "ok",
+  "data": {
+    "findings": ["chest_xray_normal"]
+  }
+}
+```
+
+### 7.3 Hooks in Manifests
+
+Hooks are declared in the `hooks` section of a manifest:
+
+```yaml
+hooks:
+  image_analysis:
+    provider: "http"
+    model: "medclip-v1"
+    point: "before:classification"
+  drug_interaction_check:
+    provider: "http"
+    model: "drug-interaction-v2"
+    point: "after:generation"
+```
+
+### 7.4 Hook Execution Rules
+
+- Hooks run in declaration order at their hook point
+- A hook failure does not crash the pipeline — it is traced with `status: "failed"` and skipped
+- Hook outputs are stored in `payload.hooks[hookName]` and are available to all subsequent layers and hooks
+- Hooks extend but never replace core layers
+
+### 7.5 Example: Healthcare Domain
+
+A healthcare triage manifest might add:
+
+```yaml
+hooks:
+  image_analysis:
+    provider: http
+    model: medclip-v1
+    point: "before:classification" # analyze X-ray before classifying intent
+  drug_interaction_check:
+    provider: http
+    model: drug-interaction-v2
+    point: "after:generation" # verify drug safety before validation
+```
+
+This adds medical capabilities without modifying any of the six core layers.
+
+---
+
+## 8. Layer Registry & createPipeline
+
+The **Layer Registry** maps `(layerName, provider)` pairs to factory functions. It is the bridge between declarative manifests and runnable pipelines.
+
+### 8.1 Registering Providers
+
+```typescript
+import { LayerRegistry } from "msm";
+
+const registry = new LayerRegistry();
+
+// Register a layer factory
+registry.register(
+  "translation",
+  "ollama",
+  (config) => new OllamaTranslation(config.model),
+);
+registry.register(
+  "translation",
+  "openai",
+  (config) => new OpenAITranslation(config.model),
+);
+
+// Register a hook factory
+registry.registerHook("http", (name, config) => new HttpHook(name, config));
+```
+
+### 8.2 createPipeline
+
+`createPipeline()` reads a manifest and builds a ready-to-run Pipeline using the registry:
+
+```typescript
+import { createPipeline, getDefaultRegistry } from "msm";
+
+const registry = await getDefaultRegistry(); // pre-loaded with dummy + ollama
+const pipeline = await createPipeline(
+  "examples/food-commerce-gulf-ollama.yaml",
+  registry,
+);
+
+const result = await pipeline.run({ raw: "ابي برغر", modality: "text" });
+```
+
+This is the "manifest as docker-compose" model: declare what you want, the registry wires it up.
+
+### 8.3 Default Registry
+
+`getDefaultRegistry()` pre-registers:
+
+| Provider | Layers                                                 | Description            |
+| -------- | ------------------------------------------------------ | ---------------------- |
+| `dummy`  | All 6                                                  | In-memory dummy models |
+| `ollama` | Translation, Classification, Orchestration, Generation | Real models via Ollama |
+
+Execution and Validation use `dummy` provider by default since they require domain-specific tool integrations.
+
+---
+
+## 9. Recommended Model Candidates
 
 These are the best available starting points for each layer as of 2026. Any model that implements the layer contract may be used instead.
 
@@ -519,7 +701,7 @@ Shared tokenizer, shared fine-tuning tooling, shared ecosystem. This simplifies 
 
 ---
 
-## 8. Dummy Model Strategy
+## 10. Dummy Model Strategy
 
 Before deploying real fine-tuned models, MSM provides a set of dummy models for each layer. These are small (under 100M parameters each) and designed not to produce high-quality results, but to prove that the pipeline, payload format, manifest system, trace system, and swap mechanism all work correctly end to end.
 
@@ -574,14 +756,38 @@ The output quality is not the point. The infrastructure working end to end is th
 
 ---
 
-## 9. Swap Mechanism
+## 11. Swap Mechanism
 
 The swap mechanism is what makes MSM a platform rather than just a pipeline. Any layer can be upgraded, replaced, or rolled back without affecting other layers or requiring downtime.
 
 ### Swap Process
 
+Swaps can be performed at two levels:
+
+**Manifest-level:** Change the `provider` and/or `model` for a layer in the manifest YAML and reload:
+
+```yaml
+# Before: dummy provider
+translation:
+  provider: dummy
+  model: "word-list-v1"
+
+# After: real Ollama model
+translation:
+  provider: ollama
+  model: "qwen2.5:3b"
 ```
-1. Update manifest — change model_id and version for the target layer
+
+**Runtime-level:** Use the Pipeline's `swap()` method to replace a layer programmatically:
+
+```typescript
+pipeline.swap("translation", new OllamaTranslation("qwen2.5:3b"));
+```
+
+**CLI flow:**
+
+```
+1. Update manifest — change provider/model for the target layer
 2. Validate manifest — msm validate manifest.yaml
 3. Load new model — msm load --layer translation --model nllb-200-600m-v3
 4. Run layer tests — msm test --layer translation
@@ -606,7 +812,7 @@ This is the core MSM promise. Layers are independent. Improvements compound over
 
 ---
 
-## 10. Evaluation Criteria
+## 12. Evaluation Criteria
 
 Each layer is evaluated independently using its own benchmark. The overall system is evaluated end to end. This separates signal from noise — if overall quality drops, you can identify exactly which layer caused it.
 
@@ -630,7 +836,7 @@ Each layer is evaluated independently using its own benchmark. The overall syste
 
 ---
 
-## 11. Business Contract
+## 13. Business Contract
 
 MSM makes the following guarantees to businesses deploying it. These guarantees are about the pipeline behavior, not the model quality, which varies by manifest.
 
@@ -658,7 +864,7 @@ MSM makes the following guarantees to businesses deploying it. These guarantees 
 
 ---
 
-## 12. Domain Expansion Path
+## 14. Domain Expansion Path
 
 MSM is designed to expand across domains without changing the core standard. Each new domain is a new manifest family, not a new system.
 
@@ -697,7 +903,7 @@ All future layers will maintain backward compatibility with v1.0 manifests.
 
 ---
 
-## 13. Open Source Strategy
+## 15. Open Source Strategy
 
 ```
 Open Source (community standard)     Proprietary (business)
@@ -717,67 +923,69 @@ Open standard builds trust and community. Managed service and fine-tuned models 
 ```
 msm/
 ├── spec/
-│   ├── layer-contracts.md
-│   ├── manifest-schema.yaml
-│   ├── payload-schema.json
-│   └── evaluation-criteria.md
-├── runtime/
-│   ├── pipeline-engine/
-│   ├── swap-mechanism/
-│   ├── trace-collector/
-│   └── manifest-loader/
-├── dummy-models/
-│   ├── translation-dummy/
-│   ├── classification-dummy/
-│   ├── orchestration-dummy/
-│   ├── execution-dummy/
-│   ├── generation-dummy/
-│   └── validation-dummy/
-├── evaluation/
-│   ├── benchmark-suite/
-│   ├── layer-scorer/
-│   └── end-to-end-tests/
-└── examples/
-    ├── food-commerce-gulf/
-    ├── retail-commerce/
-    └── generic-support/
+│   └── MSM-Specification-v1.0.md
+├── src/
+│   ├── core/
+│   │   ├── types.ts          — all layer contracts & hook types
+│   │   ├── pipeline.ts       — pipeline engine with trace & hooks
+│   │   ├── registry.ts       — LayerRegistry & createPipeline
+│   │   ├── manifest.ts       — Zod schema & YAML loader
+│   │   └── http-layer.ts     — abstract HTTP-backed layer base
+│   ├── dummy-models/         — 6 dummy layer implementations
+│   ├── ollama-layers/        — Ollama-backed layers (translation, classification, orchestration, generation)
+│   ├── server.ts             — HTTP REST API server
+│   ├── demo.ts               — CLI demo runner
+│   └── index.ts              — public barrel exports
+├── tests/
+│   ├── pipeline.test.ts      — 27 pipeline tests
+│   ├── manifest.test.ts      — 6 manifest validation tests
+│   ├── registry.test.ts      — 9 registry tests
+│   └── hooks.test.ts         — 9 hook tests
+├── examples/
+│   ├── food-commerce-gulf-dummy.yaml
+│   ├── food-commerce-gulf-ollama.yaml
+│   ├── healthcare-triage.yaml
+│   └── sports-booking.yaml
+├── Dockerfile
+└── docker-compose.yml
 ```
 
 ---
 
-## 14. Milestones
+## 16. Milestones
 
-### Milestone 1 — The Standard (Month 1–2)
+### Milestone 1 — The Standard ✅
 
-- Spec document published and open sourced
-- Layer contracts finalized
-- Manifest schema finalized
-- GitHub repository live
+- ✅ Spec document published and open sourced
+- ✅ Layer contracts finalized (6 layers + hooks)
+- ✅ Manifest schema finalized (with `provider` field and `hooks` section)
+- ✅ GitHub repository live — https://github.com/emadjumaah/msm
 
-### Milestone 2 — The Runtime (Month 2–4)
+### Milestone 2 — The Runtime ✅
 
-- Pipeline engine running
-- All six dummy models implemented
-- Full trace system working
-- End-to-end demo recorded with dummy models
+- ✅ Pipeline engine running (with trace, graceful degradation, validation gate, hooks)
+- ✅ All six dummy models implemented
+- ✅ Full trace system working
+- ✅ Layer Registry & `createPipeline()` — manifest-driven pipeline creation
+- ✅ 51 tests across 4 suites (pipeline, manifest, registry, hooks)
+- ✅ HTTP server & Docker deployment
 
-### Milestone 3 — First Real Manifest (Month 4–6)
+### Milestone 3 — First Real Manifest ✅
 
-- Food commerce Gulf manifest
-- Real models swapped in for at least Translation and Orchestration layers
-- Benchmark published comparing dummy vs real models
-- First external team uses MSM
+- ✅ Food commerce Gulf manifests (dummy + Ollama variants)
+- ✅ Real Ollama models (Qwen 2.5 3B) for Translation, Classification, Orchestration, Generation
+- ✅ Healthcare triage and sports booking blueprint manifests
 
-### Milestone 4 — Community (Month 6–9)
+### Milestone 4 — Community (In Progress)
 
-- Three domain manifests publicly available
+- ✅ Four domain manifests publicly available
 - Swap marketplace prototype
 - Fine-tuning guide published
 - Arabic commerce benchmark dataset released
 
 ---
 
-## 15. Glossary
+## 17. Glossary
 
 | Term                | Definition                                                                         |
 | ------------------- | ---------------------------------------------------------------------------------- |
@@ -788,6 +996,10 @@ msm/
 | **Trace**           | The complete payload for a single request, used for debugging and audit            |
 | **Swap**            | Replacing one layer's model without affecting other layers                         |
 | **Dummy model**     | A minimal model used to prove the pipeline works before real models are plugged in |
+| **Hook**            | A domain-specific extension that runs before or after a core layer                 |
+| **Hook point**      | A named insertion point: `before:<layer>` or `after:<layer>`                       |
+| **Provider**        | The backend that serves a layer (e.g. `dummy`, `ollama`, `http`)                   |
+| **Registry**        | Maps (layer, provider) pairs to factory functions for manifest-driven construction |
 | **Domain manifest** | A manifest configured for a specific business domain (e.g. food commerce)          |
 | **Gulf Arabic**     | The dialect family spoken in Qatar, UAE, Saudi Arabia, Kuwait, Bahrain, Oman       |
 | **Code-switching**  | The practice of alternating between Arabic and English within a single sentence    |

@@ -1,0 +1,35 @@
+services:
+  # ─── Ollama (model server) ──────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Pull the model on first run (idempotent)
+    entrypoint: >
+      sh -c "ollama serve &
+             sleep 5 &&
+             ollama pull qwen2.5:3b &&
+             wait"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # ─── MSM Pipeline Server ────────────────────────────────────
+  msm:
+    build: .
+    command: ["node", "dist/server.js", "--ollama"]
+    ports:
+      - "3000:3000"
+    environment:
+      - MSM_PORT=3000
+      - OLLAMA_BASE_URL=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+volumes:
+  ollama_data:

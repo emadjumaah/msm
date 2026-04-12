@@ -12,6 +12,9 @@
     "build": "tsc",
     "dev": "tsx watch src/cli.ts",
     "demo": "tsx src/demo.ts",
+    "demo:ollama": "tsx src/demo-ollama.ts",
+    "server": "tsx src/server.ts",
+    "server:ollama": "tsx src/server.ts --ollama",
     "test": "vitest run",
     "lint": "tsc --noEmit",
     "start": "node dist/cli.js"

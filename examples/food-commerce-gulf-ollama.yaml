@@ -1,28 +1,31 @@
 msm_version: "1.0"
-manifest_id: "food-commerce-gulf-dummy-v1"
+manifest_id: "food-commerce-gulf-ollama-v1"
 domain: "food-commerce"
 region: "gulf-arabic"
 created: "2026-04-12"
 
 layers:
   translation:
-    provider: dummy
-    model: "dummy-translation-v1"
+    provider: ollama
+    model: "qwen2.5:3b"
     version: "1.0.0"
     fine_tuned: false
+    endpoint: "http://localhost:11434/api/generate"
     mode: "translated"
 
   classification:
-    provider: dummy
-    model: "dummy-classification-v1"
+    provider: ollama
+    model: "qwen2.5:3b"
     version: "1.0.0"
     fine_tuned: false
+    endpoint: "http://localhost:11434/api/generate"
 
   orchestration:
-    provider: dummy
-    model: "dummy-orchestration-v1"
+    provider: ollama
+    model: "qwen2.5:3b"
     version: "1.0.0"
     fine_tuned: false
+    endpoint: "http://localhost:11434/api/generate"
 
   execution:
     provider: dummy
@@ -31,10 +34,11 @@ layers:
     fine_tuned: false
 
   generation:
-    provider: dummy
-    model: "dummy-generation-v1"
+    provider: ollama
+    model: "qwen2.5:3b"
     version: "1.0.0"
     fine_tuned: false
+    endpoint: "http://localhost:11434/api/generate"
 
   validation:
     provider: dummy

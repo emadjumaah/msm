@@ -7,29 +7,21 @@ MSM is an open standard for building commercial AI systems using a coordinated p
 Each model masters one task. Together they deliver results that match or exceed large LLMs — at a fraction of the cost, latency, and infrastructure.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                                                     │
-│  User Input (any language)                          │
-│       ↓                                             │
-│  [L1] Translation        → English text             │
-│       │                    + context_annotations    │
-│       ↓                                             │
-│  [L2] Classification     → Intent + Domain          │
-│       │                    (reads annotations)      │
-│       ↓                                             │
-│  [L3] Orchestration      → Workflow Steps           │
-│       ↓                                             │
-│  [L4] Execution          → Tool Results             │
-│       ↓                                             │
-│  [L5] Generation         → English Response         │
-│       ↓                                             │
-│  [L6] Validation         → Quality Gate             │
-│       ↓                                             │
-│  [L1] Translation        → Response in User Lang    │
-│       ↓                                             │
-│  Final Output                                       │
-│                                                     │
-└─────────────────────────────────────────────────────┘
+User Input (any language)
+       ↓
+  [L1] Translation        → English text + cultural context annotations
+       ↓
+  [L2] Classification     → Intent + Domain + Urgency
+       ↓
+  [L3] Orchestration      → Workflow Steps + Tool Selection
+       ↓
+  [L4] Execution          → Tool Results (API calls, DB queries)
+       ↓
+  [L5] Generation         → English Response
+       ↓
+  [L6] Validation         → Quality Gate (release / block / retry)
+       ↓
+  Final Output
 ```
 
 ## Why MSM?
@@ -37,209 +29,220 @@ Each model masters one task. Together they deliver results that match or exceed 
 |                   | LLM Approach       | MSM Approach                       |
 | ----------------- | ------------------ | ---------------------------------- |
 | Cost per call     | High               | 10–20x lower                       |
-| Latency           | 2–5 seconds        | Under 1 second                     |
+| Latency           | 2–5 seconds        | Under 1 second (GPU)               |
 | Domain accuracy   | ~80% general       | 95%+ specialized                   |
 | Language support  | English-first      | Any language via Translation Layer |
-| On-premise deploy | Impractical        | Single GPU                         |
+| On-premise deploy | Impractical        | Single GPU or CPU                  |
 | Layer upgrades    | Replace everything | Swap one model                     |
 | Auditability      | Black box          | Per-layer trace                    |
-| Training cost     | Millions           | Thousands                          |
 
-## Quick Start
+---
+
+## Getting Started
+
+### Option A: Try instantly (no models needed)
 
 ```bash
-# Install
+git clone https://github.com/emadjumaah/msm.git
+cd msm
 pnpm install
-
-# Run the demo — full pipeline with dummy models
-pnpm demo
+pnpm demo          # runs with dummy models — zero setup
 ```
 
-**Output:**
+### Option B: Run with real AI models (Ollama)
 
-```
-  ╔══════════════════════════════════╗
-  ║   MSM — Multi Small Models v1.0  ║
-  ║   Pipeline Demo (Dummy Models)   ║
-  ╚══════════════════════════════════╝
+```bash
+# 1. Install Ollama (https://ollama.com)
+brew install ollama        # macOS
+# or: curl -fsSL https://ollama.ai/install.sh | sh   # Linux
 
-  Input: "ابي اطلب برغر وبيبسي"
+# 2. Pull the model (~2GB download, runs on CPU)
+ollama pull qwen2.5:3b
 
-  [✓] Translation     → "I want to order a burger and pepsi"   60%    0ms
-       ⤷ "ابي" → "I want" (Gulf dialect form of 'أريد' — casual register...)
-  [✓] Classification  intent=place_order domain=food            80%    0ms
-  [✓] Orchestration   steps=[get_location, find_restaurant...] 70%    0ms
-  [✓] Execution       tools=[location_api✓, restaurant_api✓..] 70%    0ms
-  [✓] Generation      → "Your order ORD-9921 confirmed!..."    70%    0ms
-  [✓] Validation      passed=true score=0.8                    80%    0ms
-
-  Output: "Your order ORD-9921 from Burger House is confirmed!"
-  Language: ar-gulf · Total: 8ms
+# 3. Run the real demo
+pnpm demo:ollama
 ```
 
-## Usage
+### Option C: Run as HTTP server
+
+```bash
+pnpm server               # dummy models on http://localhost:3000
+pnpm server:ollama         # real Ollama models on http://localhost:3000
+
+# Or point at ANY manifest:
+pnpm server examples/food-commerce-gulf-ollama.yaml
+
+# Test it
+curl -X POST http://localhost:3000/api/run \
+  -H "Content-Type: application/json" \
+  -d '{"text": "ابي اطلب برغر وبيبسي"}'
+```
+
+### Option D: Docker (everything included)
+
+```bash
+docker compose up          # starts Ollama + MSM server
+# Pipeline available at http://localhost:3000/api/run
+```
+
+---
+
+## Manifests — One File Per Domain (like Docker Compose)
+
+A manifest is a YAML file that declares the complete pipeline for a domain. Think of it as docker-compose for AI models:
+
+| Docker Compose         | MSM Manifest                            |
+| ---------------------- | --------------------------------------- |
+| `image: nginx:1.25`    | `provider: ollama`, `model: qwen2.5:3b` |
+| `docker compose up`    | `createPipeline("food-gulf.yaml")`      |
+| Switch image → restart | Switch provider/model → swap layer      |
+| One file per project   | One file per domain                     |
+
+### Example: Gulf Food Commerce (Ollama)
+
+```yaml
+# examples/food-commerce-gulf-ollama.yaml
+msm_version: "1.0"
+manifest_id: "food-commerce-gulf-ollama-v1"
+domain: "food-commerce"
+region: "gulf-arabic"
+created: "2026-04-12"
+
+layers:
+  translation:
+    provider: ollama # ← which implementation to use
+    model: "qwen2.5:3b" # ← which model
+    version: "1.0.0"
+    mode: "translated"
+
+  classification:
+    provider: ollama
+    model: "qwen2.5:3b"
+
+  orchestration:
+    provider: ollama
+    model: "qwen2.5:3b"
+
+  execution:
+    provider: dummy # ← rule-based, no LLM needed
+
+  generation:
+    provider: ollama
+    model: "qwen2.5:3b"
+
+  validation:
+    provider: dummy # ← rule-based, no LLM needed
+```
+
+### Run any manifest
 
 ```typescript
-import {
-  Pipeline,
-  DummyTranslationLayer,
-  DummyClassificationLayer,
-  DummyOrchestrationLayer,
-  DummyExecutionLayer,
-  DummyGenerationLayer,
-  DummyValidationLayer,
-} from "msm";
+import { createPipeline } from "msm";
 
-const pipeline = new Pipeline();
-
-// Register layers — dummy models for now, swap real ones anytime
-pipeline.register(new DummyTranslationLayer());
-pipeline.register(new DummyClassificationLayer());
-pipeline.register(new DummyOrchestrationLayer());
-pipeline.register(new DummyExecutionLayer());
-pipeline.register(new DummyGenerationLayer());
-pipeline.register(new DummyValidationLayer());
-
-// Run
+// One line: reads manifest → looks up providers → creates all layers → returns pipeline
+const pipeline = await createPipeline(
+  "./examples/food-commerce-gulf-ollama.yaml",
+);
 const trace = await pipeline.run({
   raw: "ابي اطلب برغر وبيبسي",
   modality: "text",
 });
-
-console.log(trace.payload.final_output);
-// { text: "Your order ORD-9921 from Burger House is confirmed!...", language: "ar-gulf", total_latency_ms: 8 }
 ```
 
-### Swap a layer
+```bash
+# Or via HTTP server — pass any manifest as argument:
+pnpm server examples/food-commerce-gulf-ollama.yaml
+pnpm server examples/food-commerce-gulf-dummy.yaml
+```
+
+### Switch domains = switch manifest
+
+```
+examples/
+├── food-commerce-gulf-dummy.yaml    ← Gulf food, offline (run locally now)
+├── food-commerce-gulf-ollama.yaml   ← Gulf food, real Ollama (run locally now)
+├── healthcare-triage.yaml           ← Medical triage (production blueprint)
+└── sports-booking.yaml              ← Sports booking (production blueprint)
+```
+
+The `dummy` and `ollama` manifests run locally out of the box. The `healthcare` and `sports` manifests are production blueprints — they show what a real deployment looks like with dedicated model servers. To use them, register your own providers or swap to `dummy`/`ollama`.
+
+Each manifest is self-contained. Switching from food to healthcare is one line change — not a code change.
+
+---
+
+## Adding Custom Providers (No Core Changes)
+
+MSM ships with two built-in providers: `dummy` and `ollama`. Adding your own takes 2 steps:
+
+### Step 1: Create your layer class
 
 ```typescript
 import type { MSMLayer, MSMPayload, TranslationOutput } from "msm";
 
-// Implement the layer contract
-class MyRealTranslationLayer implements MSMLayer<TranslationOutput> {
+class OpenAITranslationLayer implements MSMLayer<TranslationOutput> {
   name = "translation" as const;
 
+  constructor(private model: string) {}
+
   async process(payload: MSMPayload): Promise<TranslationOutput> {
-    // Call your NLLB-200 endpoint, Helsinki OPUS-MT, etc.
-    const result = await fetch("http://localhost:8000/translate", {
+    const start = performance.now();
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      body: JSON.stringify({ text: payload.input.raw }),
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages: [{ role: "user", content: payload.input.raw }],
+      }),
     }).then((r) => r.json());
 
     return {
-      translated_text: result.text,
-      source_language: result.source,
+      translated_text: res.choices[0].message.content,
+      source_language: "ar",
       target_language: "en",
       layer_invoked: true,
       mode: "translated",
-      context_annotations: result.annotations,
-      model_id: "nllb-200-600m",
-      model_ver: "2.1",
-      latency_ms: result.latency,
-      confidence: result.confidence,
+      model_id: this.model,
+      model_ver: "1.0",
+      latency_ms: Math.round(performance.now() - start),
+      confidence: 0.95,
       status: "ok",
     };
   }
 }
-
-// Hot-swap at runtime
-pipeline.swap(new MyRealTranslationLayer());
 ```
 
-## Project Structure
+### Step 2: Register it
 
-```
-msm/
-├── src/
-│   ├── core/
-│   │   ├── types.ts          ← Layer contracts (the standard)
-│   │   ├── pipeline.ts       ← Pipeline engine + trace + validation gate
-│   │   ├── manifest.ts       ← Manifest loader + Zod validation
-│   │   └── http-layer.ts     ← Base class for HTTP-backed model layers
-│   ├── dummy-models/
-│   │   ├── translation.ts    ← Dummy word-list substitution
-│   │   ├── classification.ts ← Dummy keyword matching
-│   │   ├── orchestration.ts  ← Dummy hardcoded workflows
-│   │   ├── execution.ts      ← Dummy mock tool calls
-│   │   ├── generation.ts     ← Dummy template responses
-│   │   └── validation.ts     ← Dummy content checks
-│   ├── cli.ts                ← CLI: msm demo / validate / trace
-│   ├── demo.ts               ← Run: pnpm demo
-│   └── index.ts              ← Public API
-├── tests/
-│   ├── pipeline.test.ts      ← 33+ pipeline tests
-│   └── manifest.test.ts      ← 6 manifest tests
-├── spec/
-│   └── MSM-Specification-v1.0.md
-├── examples/
-│   ├── food-commerce-gulf-dummy.yaml
-│   ├── healthcare-triage.yaml
-│   └── sports-booking.yaml
-└── package.json
+```typescript
+import { getDefaultRegistry, createPipeline } from "msm";
+
+const registry = await getDefaultRegistry();
+registry.register(
+  "translation",
+  "openai",
+  (config) => new OpenAITranslationLayer(config.model),
+);
+// Now "openai" is available as a provider in manifests
 ```
 
-## The Six Layers
-
-| #   | Layer              | Job                                | Recommended Model        |
-| --- | ------------------ | ---------------------------------- | ------------------------ |
-| 1   | **Translation**    | Convert any language ↔ English     | NLLB-200 600M            |
-| 2   | **Classification** | Identify intent, domain, urgency   | mDeBERTa-v3 + CAMeL-BERT |
-| 3   | **Orchestration**  | Plan workflow steps + select tools | Qwen 2.5 3B              |
-| 4   | **Execution**      | Execute tool calls, handle errors  | Functionary Small v3     |
-| 5   | **Generation**     | Compose natural response           | Qwen 2.5 0.5B            |
-| 6   | **Validation**     | Verify quality, policy, safety     | MiniCheck + DeBERTa-v3   |
-
-**Total: ~6.75B parameters · Single GPU · Under 1 second · Fraction of a cent per call**
-
-## Manifest System
-
-Every deployment declares a manifest — which model fills each layer:
+### Step 3: Use it in a manifest
 
 ```yaml
-msm_version: "1.0"
-manifest_id: "food-commerce-gulf-v1"
-domain: "food-commerce"
-region: "gulf-arabic"
-
 layers:
   translation:
-    model: "nllb-200-600m"
-    version: "2.1"
-    fine_tuned: true
-    dataset: "gulf-commerce-ar-en-v3"
-  # ... one entry per layer
+    provider: openai
+    model: "gpt-4o-mini"
+  classification:
+    provider: ollama
+    model: "qwen2.5:3b"
+  # mix providers freely...
 ```
 
-Swap a model = update the manifest. No other layers affected. This is the core MSM promise.
-
-## Domain Examples
-
-MSM is domain-agnostic. The same 6-layer pipeline serves any specialized domain:
-
-| Manifest                        | Domain         | Use Case                                                  |
-| ------------------------------- | -------------- | --------------------------------------------------------- |
-| `food-commerce-gulf-dummy.yaml` | Food Commerce  | Order food, track delivery, cancel orders                 |
-| `healthcare-triage.yaml`        | Healthcare     | Symptom assessment, triage routing, patient communication |
-| `sports-booking.yaml`           | Sports Booking | Court reservations, class scheduling, membership          |
-
-Each domain is a new manifest — not a new system. Add your own by creating a YAML file in `examples/`.
-
-## CLI
-
-```bash
-# Run the demo pipeline
-msm demo
-
-# Validate a manifest
-msm validate examples/healthcare-triage.yaml
-
-# Run pipeline and get full JSON trace
-msm trace examples/food-commerce-gulf-dummy.yaml "ابي اطلب برغر"
-```
-
-## Connecting Real Models
-
-For production, extend `HttpLayer` to call a model server (vLLM, Ollama, TGI, ONNX Runtime, or any HTTP endpoint):
+### Or extend HttpLayer for even less code
 
 ```typescript
 import { HttpLayer } from "msm";
@@ -248,7 +251,7 @@ import type { TranslationOutput, MSMPayload } from "msm";
 class NLLBTranslationLayer extends HttpLayer<TranslationOutput> {
   name = "translation" as const;
   constructor() {
-    super("http://localhost:8000/translate");
+    super("http://your-model-server:8000/translate");
   }
 
   protected buildRequestBody(payload: MSMPayload) {
@@ -271,18 +274,164 @@ class NLLBTranslationLayer extends HttpLayer<TranslationOutput> {
     };
   }
 }
-
-pipeline.swap(new NLLBTranslationLayer());
 ```
+
+### Built-in providers
+
+| Provider | Layers                                                 | Requirements     | Use Case         |
+| -------- | ------------------------------------------------------ | ---------------- | ---------------- |
+| `dummy`  | All 6                                                  | None             | Testing, offline |
+| `ollama` | Translation, Classification, Orchestration, Generation | Ollama installed | Local AI, dev    |
+| `http`   | (base class)                                           | Model server     | Production       |
+
+---
+
+## Hooks — Domain Extensions Without Core Changes
+
+The 6 core layers are the standard. They don't change. But different domains need specialized processing — image recognition, drug checks, fraud detection. That's what **hooks** are for.
+
+Hooks plug in **between** layers. They enrich the payload without touching the pipeline architecture:
+
+```
+           ┌─────────────────────────────┐
+           │  HEALTHCARE PIPELINE        │
+           │                             │
+           │  [L1] Translation           │
+           │       ↓                     │
+           │  ⚡ image_analysis hook      │  ← reads X-ray, adds findings
+           │       ↓                     │
+           │  [L2] Classification        │  ← now sees "normal chest X-ray"
+           │       ↓                     │
+           │  [L3] Orchestration         │
+           │       ↓                     │
+           │  [L4] Execution             │
+           │       ↓                     │
+           │  [L5] Generation            │
+           │       ↓                     │
+           │  ⚡ drug_interaction hook    │  ← checks for dangerous combos
+           │       ↓                     │
+           │  [L6] Validation            │
+           └─────────────────────────────┘
+```
+
+### Declare hooks in the manifest
+
+```yaml
+# examples/healthcare-triage.yaml
+layers:
+  translation: { provider: ollama, model: "qwen2.5:3b", ... }
+  classification: { provider: http, model: "mdeberta-v3-medical", ... }
+  # ... 6 standard layers ...
+
+hooks:
+  image_analysis:
+    provider: http
+    model: "medclip-v1"
+    point: "before:classification" # ← when to run
+    endpoint: "http://localhost:8010/analyze-image"
+
+  drug_interaction_check:
+    provider: http
+    model: "drugcheck-v1"
+    point: "after:generation" # ← runs after response is generated
+    endpoint: "http://localhost:8011/drug-check"
+```
+
+### Use hooks in code
+
+```typescript
+import { Pipeline } from "msm";
+import type { MSMHook } from "msm";
+
+const pipeline = new Pipeline();
+// ... register 6 core layers ...
+
+// Add a custom hook — no core changes needed
+pipeline.addHook({
+  name: "image_analysis",
+  point: "before:classification",
+  async process(payload) {
+    const result = await analyzeImage(payload.input.raw);
+    return {
+      model_id: "medclip-v1",
+      model_ver: "1.0",
+      latency_ms: 200,
+      confidence: 0.92,
+      status: "ok",
+      data: { findings: result.findings, image_type: "xray" },
+    };
+  },
+});
+```
+
+### Hook guarantees
+
+- Hooks **never break the pipeline** — if a hook fails, it's recorded and the pipeline continues
+- Hook output is stored in `payload.hooks["hook_name"]` — downstream layers can read it
+- Hooks appear in the trace alongside core layers
+- Multiple hooks can run at the same point
+- Available points: `before:translation`, `after:translation`, `before:classification`, `after:classification`, etc.
+
+### Domain examples
+
+| Domain     | Hook               | Point                   | Purpose                                  |
+| ---------- | ------------------ | ----------------------- | ---------------------------------------- |
+| Healthcare | `image_analysis`   | `before:classification` | Convert X-ray/MRI to structured findings |
+| Healthcare | `drug_interaction` | `after:generation`      | Check response for dangerous drug combos |
+| E-commerce | `fraud_detection`  | `after:classification`  | Flag suspicious purchase patterns        |
+| Legal      | `compliance_check` | `after:generation`      | Verify response meets regulations        |
+| Finance    | `kyc_verification` | `before:execution`      | Verify identity before processing        |
+
+---
+
+## HTTP Server API
+
+```bash
+pnpm server                                          # dummy models
+pnpm server:ollama                                   # Ollama models
+pnpm server examples/food-commerce-gulf-ollama.yaml  # any manifest
+MSM_PORT=8080 pnpm server                            # custom port
+```
+
+### `POST /api/run`
+
+```json
+{
+  "text": "ابي اطلب برغر وبيبسي",
+  "modality": "text",
+  "session_id": "optional-session-id"
+}
+```
+
+Response includes the final output, per-layer trace, and full payload for debugging.
+
+### `GET /api/health`
+
+Returns server status and registered layers.
+
+---
+
+## The Six Layers
+
+| #   | Layer              | Job                                | Dummy Model            | Ollama Model | Production Model         |
+| --- | ------------------ | ---------------------------------- | ---------------------- | ------------ | ------------------------ |
+| 1   | **Translation**    | Convert any language ↔ English     | Word-list substitution | qwen2.5:3b   | NLLB-200 600M            |
+| 2   | **Classification** | Identify intent, domain, urgency   | Keyword matching       | qwen2.5:3b   | mDeBERTa-v3 + CAMeL-BERT |
+| 3   | **Orchestration**  | Plan workflow steps + select tools | Hardcoded workflows    | qwen2.5:3b   | Qwen 2.5 3B              |
+| 4   | **Execution**      | Execute tool calls, handle errors  | Mock API responses     | Mock APIs    | Your real APIs           |
+| 5   | **Generation**     | Compose natural response           | Template responses     | qwen2.5:3b   | Qwen 2.5 0.5B            |
+| 6   | **Validation**     | Verify quality, policy, safety     | Blocked-word check     | Rule-based   | MiniCheck + DeBERTa-v3   |
+
+---
 
 ## Cultural Context Annotations
 
-When translating from non-English languages, literal translation loses cultural meaning. For example:
+When translating from non-English languages, literal translation loses cultural meaning:
 
 - **"اريد شي خفيف"** → literally "I want something light"
 - But in Gulf Arabic, **"خفيف"** means a snack or small portion, not low-calorie food
 
-MSM solves this with **context annotations** — the Translation Layer produces cultural hints alongside the translated text:
+MSM's Translation Layer produces **context annotations** alongside the translated text:
 
 ```json
 {
@@ -291,53 +440,94 @@ MSM solves this with **context annotations** — the Translation Layer produces 
     {
       "original_term": "خفيف",
       "translated_term": "light",
-      "cultural_meaning": "In Gulf Arabic, 'خفيف' when referring to food means a snack or small portion, not low-calorie",
+      "cultural_meaning": "In Gulf Arabic, 'خفيف' means a snack or small portion",
       "intent_hints": ["snack", "small_portion", "quick_meal"]
     }
   ]
 }
 ```
 
-Downstream layers (especially Classification) read `intent_hints` to make better decisions — without needing Arabic language models. The cultural nuance stays inside the Translation Layer where it belongs.
+Downstream layers read `intent_hints` to make better decisions — the cultural nuance stays in the Translation Layer where it belongs.
 
-### Translation Modes
+---
 
-| Mode         | When              | Behavior                                     |
-| ------------ | ----------------- | -------------------------------------------- |
-| `translated` | Non-English input | Translates to English + produces annotations |
-| `native`     | English input     | Passthrough, no annotations                  |
+## Project Structure
+
+```
+msm/
+├── src/
+│   ├── core/
+│   │   ├── types.ts          ← Layer contracts (THE standard)
+│   │   ├── pipeline.ts       ← Pipeline engine + trace + validation gate
+│   │   ├── registry.ts       ← Provider registry + createPipeline()
+│   │   ├── manifest.ts       ← Manifest loader + Zod validation
+│   │   └── http-layer.ts     ← Base class for HTTP-backed layers
+│   ├── dummy-models/         ← Provider: "dummy" (no deps, instant)
+│   │   ├── translation.ts
+│   │   ├── classification.ts
+│   │   ├── orchestration.ts
+│   │   ├── execution.ts
+│   │   ├── generation.ts
+│   │   └── validation.ts
+│   ├── ollama-layers/        ← Provider: "ollama" (real LLM)
+│   │   ├── ollama-client.ts
+│   │   ├── translation.ts
+│   │   ├── classification.ts
+│   │   ├── orchestration.ts
+│   │   └── generation.ts
+│   ├── server.ts             ← HTTP server (any manifest)
+│   ├── demo.ts               ← Demo: pnpm demo
+│   ├── demo-ollama.ts        ← Demo: pnpm demo:ollama
+│   ├── cli.ts                ← CLI: msm demo / validate / trace
+│   └── index.ts              ← Public API (all exports)
+├── tests/
+│   ├── pipeline.test.ts      ← 27 pipeline tests
+│   ├── manifest.test.ts      ← 6 manifest tests
+│   ├── registry.test.ts      ← 9 registry tests
+│   └── hooks.test.ts         ← 9 hook tests (51 total)
+├── examples/                 ← Domain manifests (like docker-compose files)
+│   ├── food-commerce-gulf-dummy.yaml
+│   ├── food-commerce-gulf-ollama.yaml
+│   ├── healthcare-triage.yaml
+│   └── sports-booking.yaml
+├── spec/
+│   └── MSM-Specification-v1.0.md
+├── Dockerfile
+├── docker-compose.yml
+└── package.json
+```
+
+---
 
 ## Pipeline Guarantees
 
-- **Graceful degradation** — if a layer fails or throws, the pipeline continues with a recorded failure; it never crashes
-- **Validation gate** — the validation layer can `block` unsafe responses (replaced with a safe fallback) or `retry` generation
-- **Full trace** — every request produces a complete trace with per-layer model IDs, latency, confidence, and status
-- **Hot swap** — any layer can be replaced at runtime without restarting the pipeline
+- **Graceful degradation** — if a layer or hook fails, pipeline continues with a recorded failure
+- **Validation gate** — `block` unsafe responses (fallback) or `retry` generation
+- **Full trace** — every request has per-layer model IDs, latency, confidence, and status (including hooks)
+- **Hot swap** — replace any layer at runtime without restarting
+- **Extensible** — add domain-specific hooks without changing the 6 core layers
 
-## Spec
-
-Full specification: [MSM-Specification-v1.0.md](spec/MSM-Specification-v1.0.md)
-
-Covers: layer contracts, payload format, manifest schema, evaluation criteria, swap mechanism, business guarantees, domain expansion path, and open source strategy.
+---
 
 ## Roadmap
 
 - [x] Specification v1.0
 - [x] TypeScript runtime + pipeline engine
-- [x] 6 dummy model layers
+- [x] Dummy model layers (provider: dummy)
+- [x] Ollama model layers (provider: ollama)
+- [x] Provider registry + `createPipeline()` from manifests
+- [x] HTTP server + REST API (any manifest)
+- [x] Docker compose (Ollama + MSM)
+- [x] Cultural context annotations
 - [x] Manifest system + Zod validation
-- [x] Trace system
-- [x] Graceful degradation
-- [x] Validation gate (block / retry)
-- [x] HTTP adapter base class for real models
+- [x] Graceful degradation + validation gate
+- [x] Hooks system (domain extensions without core changes)
 - [x] CLI (demo / validate / trace)
-- [x] Cultural context annotations (Option C)
-- [x] Translation modes (translated / native)
-- [x] 33+ tests passing
-- [x] Multi-domain example manifests
-- [ ] Real model integration (NLLB-200, Qwen, Functionary)
-- [ ] Benchmark suite
+- [x] 51+ tests passing
+- [ ] Benchmark suite (latency, accuracy per layer)
+- [ ] Production model examples (NLLB, Functionary)
 - [ ] npm publish
+- [ ] Web UI dashboard
 
 ## Philosophy
 

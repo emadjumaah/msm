@@ -120,6 +120,9 @@ export interface MSMPayload {
   generation?: GenerationOutput;
   validation?: ValidationOutput;
   final_output?: FinalOutput;
+
+  /** Hook outputs keyed by hook name (domain-specific extensions) */
+  hooks?: Record<string, HookOutput>;
 }
 
 // ─── Layer Interface ─────────────────────────────────────────
@@ -135,4 +138,33 @@ export type LayerName =
 export interface MSMLayer<T extends LayerMeta = LayerMeta> {
   name: LayerName;
   process(payload: MSMPayload): Promise<T>;
+}
+
+// ─── Hooks — Domain-specific extensions between layers ───────
+
+/**
+ * Hook points: run custom logic before/after any core layer.
+ *
+ * Examples:
+ *   "before:translation"   → image-to-text, voice-to-text
+ *   "after:classification"  → fraud detection, priority override
+ *   "after:generation"      → drug interaction check, compliance
+ *
+ * Hooks do NOT replace layers. They enrich the payload.
+ * The 6 core layers remain the standard.
+ */
+export type HookPoint = `before:${LayerName}` | `after:${LayerName}`;
+
+export interface HookOutput extends LayerMeta {
+  /** Arbitrary structured data added to payload.hooks[hookName] */
+  data: Record<string, unknown>;
+}
+
+export interface MSMHook {
+  /** Unique name for this hook (e.g. "image_recognition", "drug_check") */
+  name: string;
+  /** When to run relative to the 6 core layers */
+  point: HookPoint;
+  /** Process the payload and return structured output */
+  process(payload: MSMPayload): Promise<HookOutput>;
 }
