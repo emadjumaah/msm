@@ -65,13 +65,30 @@ export interface ClassificationOutput extends LayerMeta {
 
 export type OrchestrationMode = "rules" | "llm" | "hybrid";
 
-/** In iterative mode, orchestration decides the next action each iteration */
-export type OrchestrationAction =
-  | "use_tool"
-  | "respond"
-  | "clarify"
-  | "escalate"
-  | "delegate";
+/**
+ * Standard orchestration actions.
+ *
+ * MSM defines 5 standard actions that the pipeline understands natively:
+ *   - "use_tool"  — call a tool, then re-enter orchestration (iterative mode)
+ *   - "respond"   — stop iterating, proceed to generation
+ *   - "clarify"   — ask the user for more information, proceed to generation
+ *   - "escalate"  — hand off to a human, proceed to generation
+ *   - "delegate"  — hand off to another agent/role, proceed to generation
+ *
+ * The type is `string` (not a union) — agents can define custom actions
+ * beyond the standard set. Only "use_tool" triggers another iteration;
+ * any other action is treated as terminal (proceed to generation).
+ */
+export type OrchestrationAction = string;
+
+/** The 5 standard actions — use these constants for type safety */
+export const STANDARD_ACTIONS = {
+  USE_TOOL: "use_tool" as OrchestrationAction,
+  RESPOND: "respond" as OrchestrationAction,
+  CLARIFY: "clarify" as OrchestrationAction,
+  ESCALATE: "escalate" as OrchestrationAction,
+  DELEGATE: "delegate" as OrchestrationAction,
+} as const;
 
 export interface OrchestrationOutput extends LayerMeta {
   /** Next action — required in iterative mode, optional in linear */

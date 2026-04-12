@@ -7,24 +7,87 @@ MSM is an open standard for building commercial AI systems using a coordinated p
 Each model masters one task. Together they deliver results that match large LLMs on structured, domain-specific tasks — at a fraction of the cost, latency, and infrastructure.
 
 ```
-User Input (any language)
-       ↓
-  [L1] Translation        → English text (skipped if input is already English)
-       ↓
-  [L2] Classification     → Intent + Domain + Urgency
-       ↓
-  [L3] Orchestration      → Workflow Steps + Tool Selection
-       ↓
-  [L4] Execution          → Tool Results (API calls, DB queries)
-       ↓
-  [L5] Generation         → English Response
-       ↓
-  [L6] Validation         → Quality Gate (release / block / retry)
-       ↓
-  [L7] Outbound Translation → User's language (auto if inbound was translated)
-       ↓
-  Final Output
+System 1 — Linear (fast brain)        System 2 — Iterative (full brain)
+
+User Input                            User Input
+     ↓                                     ↓
+[L1] Translation                      [L1] Translation
+     ↓                                     ↓
+[L2] Classification                   [L2] Classification
+     ↓                                     ↓
+[L3] Orchestration                    ┌→ [L3] Orchestration ─┐
+     ↓                                │       ↓              │
+[L4] Execution                        │  [L4] Execution      │ loop while
+     ↓                                │       ↓              │ action = "use_tool"
+[L5] Generation                       └──────────────────────┘
+     ↓                                     ↓
+[L6] Validation                       [L5] Generation
+     ↓                                     ↓
+[L7] Outbound Translation            [L6] Validation
+     ↓                                     ↓
+Final Output                          [L7] Outbound Translation
+                                           ↓
+                                      Final Output (with iterations[])
 ```
+
+## Two Pipeline Modes — System 1 & System 2
+
+MSM supports two pipeline modes, inspired by Kahneman's fast/slow thinking:
+
+|                | System 1 (linear)                                                  | System 2 (iterative)                                                   |
+| -------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Mode           | `"linear"`                                                         | `"iterative"`                                                          |
+| Path           | translate → classify → orchestrate → execute → generate → validate | translate → classify → [orchestrate → execute]\* → generate → validate |
+| Loop           | None                                                               | orchestrate→execute repeats while `action === "use_tool"`              |
+| Max iterations | N/A                                                                | configurable (`max_iterations`, default 5)                             |
+| Output         | `final_output.text`                                                | `final_output.text` + `iterations[]` + `iterations_used`               |
+| Use case       | Simple FAQ, greetings, single-step tasks                           | Multi-tool tasks, complex reasoning, multi-step workflows              |
+
+### Configure in manifest
+
+```yaml
+pipeline:
+  mode: "iterative" # "linear" (default) or "iterative"
+  max_iterations: 6 # max orchestrate→execute loops (default: 5)
+```
+
+### Or in code
+
+```typescript
+const fastBrain = new Pipeline({ mode: "linear" });
+const fullBrain = new Pipeline({ mode: "iterative", maxIterations: 6 });
+```
+
+See [examples/agent-integration.ts](examples/agent-integration.ts) for a working dual-brain demo.
+
+---
+
+## Extensible Orchestration Actions
+
+The orchestration layer returns an `action` field that tells the pipeline what to do next. MSM ships with 5 standard actions:
+
+```typescript
+import { STANDARD_ACTIONS } from "msm-ai";
+
+STANDARD_ACTIONS.USE_TOOL; // "use_tool"  — triggers iteration (System 2)
+STANDARD_ACTIONS.RESPOND; // "respond"   — generate response directly
+STANDARD_ACTIONS.CLARIFY; // "clarify"   — ask user for more info
+STANDARD_ACTIONS.ESCALATE; // "escalate"  — hand off to human agent
+STANDARD_ACTIONS.DELEGATE; // "delegate"  — pass to another agent
+```
+
+`OrchestrationAction` is typed as `string` — agents can define any custom action they need:
+
+```typescript
+// Agent-specific actions — MSM doesn't need to know about them
+action: "require_approval"; // e.g. cancellation needs manager approval
+action: "wait_for_payment"; // e.g. hold until payment confirms
+action: "schedule_callback"; // e.g. call customer back later
+```
+
+Only `"use_tool"` has special pipeline behavior (triggers the orchestrate→execute loop in iterative mode). Every other action — standard or custom — is treated as terminal: the pipeline moves straight to generation.
+
+---
 
 ## Why MSM — and not LangChain / LlamaIndex?
 
@@ -205,14 +268,16 @@ pnpm server examples/food-commerce-gulf-dummy.yaml
 
 ```
 examples/
-├── food-commerce-gulf-dummy.yaml    ← Gulf food, offline (run locally now)
-├── food-commerce-gulf-ollama.yaml   ← Gulf food, real Ollama (run locally now)
-├── healthcare-triage.yaml           ← Medical triage (production blueprint)
-├── sports-booking.yaml              ← Sports booking (production blueprint)
-├── legal-compliance.yaml            ← Legal/contract review (production blueprint)
-├── banking-support.yaml             ← Gulf banking support (production blueprint)
-├── education-tutoring.yaml          ← AI tutoring (production blueprint)
-└── ecommerce-retail.yaml            ← Gulf e-commerce (production blueprint)
+├── food-commerce-gulf-dummy.yaml         ← Gulf food, offline (run locally now)
+├── food-commerce-gulf-ollama.yaml        ← Gulf food, real Ollama (run locally now)
+├── food-commerce-gulf-iterative.yaml     ← Gulf food, iterative mode (System 2)
+├── healthcare-triage.yaml                ← Medical triage (production blueprint)
+├── sports-booking.yaml                   ← Sports booking (production blueprint)
+├── legal-compliance.yaml                 ← Legal/contract review (production blueprint)
+├── banking-support.yaml                  ← Gulf banking support (production blueprint)
+├── education-tutoring.yaml               ← AI tutoring (production blueprint)
+├── ecommerce-retail.yaml                 ← Gulf e-commerce (production blueprint)
+└── agent-integration.ts                  ← Dual-brain agent integration demo
 ```
 
 The `dummy` and `ollama` manifests run locally out of the box. The other manifests are production blueprints — they show what a real deployment looks like with dedicated model servers and domain-specific hooks. To use them, register your own providers or swap to `dummy`/`ollama`.
@@ -435,6 +500,44 @@ pipeline.addHook({
 
 ---
 
+## Agent Integration — Dual-Brain Pattern
+
+MSM is designed as the **structured brain** for agent frameworks. The recommended pattern: run two pipelines and route by complexity.
+
+```typescript
+import { Pipeline, STANDARD_ACTIONS } from "msm-ai";
+
+// System 1: fast brain — linear, handles simple messages
+const fastBrain = new Pipeline({ mode: "linear" });
+// ... register 6 layers, then freeze
+fastBrain.freeze();
+
+// System 2: full brain — iterative, handles multi-tool tasks
+const fullBrain = new Pipeline({ mode: "iterative", maxIterations: 6 });
+// ... register layers (with custom orchestration that uses tools)
+fullBrain.freeze();
+
+// Agent router
+async function handleMessage(text: string) {
+  // Quick classify with fast brain
+  const quick = await fastBrain.run({ raw: text, modality: "text" });
+  const action = quick.payload.orchestration?.action;
+
+  // Simple message → fast brain already handled it
+  if (action !== STANDARD_ACTIONS.USE_TOOL) {
+    return quick.payload.final_output?.text;
+  }
+
+  // Complex task → send to full brain for multi-step reasoning
+  const full = await fullBrain.run({ raw: text, modality: "text" });
+  return full.payload.final_output?.text; // includes iterations[]
+}
+```
+
+See [examples/agent-integration.ts](examples/agent-integration.ts) for the full runnable demo with custom actions, multi-step tool calls, and routing logic.
+
+---
+
 ## HTTP Server API
 
 ```bash
@@ -573,7 +676,7 @@ msm/
 ├── src/
 │   ├── core/
 │   │   ├── types.ts          ← Layer contracts (THE standard)
-│   │   ├── pipeline.ts       ← Pipeline engine + trace + validation gate
+│   │   ├── pipeline.ts       ← Pipeline engine (linear + iterative modes)
 │   │   ├── registry.ts       ← Provider registry + createPipeline()
 │   │   ├── manifest.ts       ← Manifest loader + Zod validation
 │   │   └── http-layer.ts     ← Base class for HTTP-backed layers
@@ -596,19 +699,21 @@ msm/
 │   ├── cli.ts                ← CLI: msm demo / validate / trace
 │   └── index.ts              ← Public API (all exports)
 ├── tests/
-│   ├── pipeline.test.ts      ← 36 pipeline tests
-│   ├── manifest.test.ts      ← 9 manifest tests
-│   ├── registry.test.ts      ← 11 registry tests
-│   └── hooks.test.ts         ← 9 hook tests (65 total)
-├── examples/                 ← Domain manifests (like docker-compose files)
+│   ├── pipeline.test.ts      ← 60 pipeline tests (linear + iterative)
+│   ├── manifest.test.ts      ← 13 manifest tests
+│   ├── registry.test.ts      ← 13 registry tests
+│   └── hooks.test.ts         ← 9 hook tests (95 total)
+├── examples/                 ← Domain manifests + integration demos
 │   ├── food-commerce-gulf-dummy.yaml
 │   ├── food-commerce-gulf-ollama.yaml
+│   ├── food-commerce-gulf-iterative.yaml  ← System 2 iterative mode
 │   ├── healthcare-triage.yaml
 │   ├── sports-booking.yaml
 │   ├── legal-compliance.yaml
 │   ├── banking-support.yaml
 │   ├── education-tutoring.yaml
-│   └── ecommerce-retail.yaml
+│   ├── ecommerce-retail.yaml
+│   └── agent-integration.ts               ← Dual-brain demo
 ├── spec/
 │   └── MSM-Specification-v1.0.md
 ├── Dockerfile
@@ -660,17 +765,22 @@ Results are saved to `benchmark-results.json` for programmatic use.
 ## Pipeline Guarantees
 
 - **Outbound translation** — non-English users automatically receive responses in their language (direction-aware: translation layers receive `direction: "outbound"` + `target_language`)
+- **Two pipeline modes** — `linear` (System 1, fast) and `iterative` (System 2, multi-tool reasoning loop)
+- **Extensible actions** — `OrchestrationAction` is `string` — use standard actions (`STANDARD_ACTIONS`) or define your own; only `"use_tool"` triggers iteration
 - **Typed fallbacks** — if a layer fails, downstream layers get valid typed defaults (e.g. `intent: "unknown"`, `domain: "general"`), not bare error objects
 - **Graceful degradation** — if a layer or hook fails, pipeline continues with a recorded failure
 - **Validation gate** — `block` unsafe responses (fallback) or `retry` generation (with `_validation_feedback` injected so generation knows WHY the previous attempt was rejected)
-- **Full trace** — every request has per-layer model IDs, latency, confidence, and status (including hooks and outbound translation)
+- **Full trace** — every request has per-layer model IDs, latency, confidence, and status (including hooks, outbound translation, and iteration history)
+- **Immutable pipelines** — `pipeline.freeze()` locks layer/hook registration for safe concurrent use
 - **Atomic runs** — `run()` snapshots layers and hooks at start, so mid-flight `swap()` calls don't affect in-progress requests
 - **Hot swap** — replace any layer at runtime without restarting
+- **AbortSignal** — pass `signal` to `pipeline.run()` for request cancellation
 - **Sequential hooks** — multiple hooks at the same point run in declaration order per spec, with `structuredClone` isolation (hooks cannot mutate the live payload)
 - **Session history** — `input.history` carries multi-turn conversation context through the pipeline
 - **Strict manifests** — per-layer Zod schemas with `.strict()`, ISO 8601 date validation, unknown fields rejected
 - **Hardened server** — Zod request validation, 64KB body limit, 10s read timeout (slowloris protection)
 - **Registry guards** — duplicate registration throws, factory output verified against requested layer name
+- **Bilingual output** — `response_text_ar` / `text_ar` for Arabic responses alongside English
 - **Extensible** — add domain-specific hooks without changing the 6 core layers
 
 ---
@@ -693,9 +803,16 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - [x] Session history (multi-turn conversation context)
 - [x] Hooks system (domain extensions without core changes)
 - [x] CLI (demo / validate / trace)
-- [x] 65 tests passing
+- [x] 95 tests passing
 - [x] Benchmark suite (latency, accuracy per layer)
 - [x] 8 domain manifests (food, healthcare, sports, legal, banking, education, e-commerce)
+- [x] Iterative pipeline mode (System 2 — orchestrate→execute loop)
+- [x] Extensible orchestration actions (STANDARD_ACTIONS + custom strings)
+- [x] Agent integration example (dual-brain fast/full)
+- [x] Pipeline freeze (immutable for concurrent use)
+- [x] AbortSignal support (request cancellation)
+- [x] Ollama Zod validation + retry + rate limiting
+- [x] Bilingual output (response_text_ar, text_ar)
 - [x] Strict manifest validation (per-layer Zod schemas, ISO 8601 dates)
 - [x] Hardened server (Zod validation, body limits, read timeout)
 - [x] Registry guards (duplicate detection, factory verification)
@@ -703,7 +820,7 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - [x] Retry feedback (validation violations fed back to generation)
 - [x] Ollama client timeout (30s AbortController)
 - [ ] Production model examples (NLLB, Functionary)
-- [x] npm publish (`msm-ai` on npm, v1.2.0)
+- [x] npm publish (`msm-ai` on npm, v1.6.0)
 - [ ] Fine-tuning guide for domain-specific models
 - [ ] Streaming output (Time-to-First-Token)
 - [ ] Observability dashboard (per-layer trace visualization)

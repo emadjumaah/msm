@@ -28,6 +28,8 @@ export type {
   MSMHook,
 } from "./core/types.js";
 
+export { STANDARD_ACTIONS } from "./core/types.js";
+
 export { Pipeline } from "./core/pipeline.js";
 export type {
   PipelineTrace,
