@@ -1,0 +1,105 @@
+# STATUS: Blueprint only. Requires external model servers.
+# To run locally, change all providers to: dummy or ollama
+
+msm_version: "1.0"
+manifest_id: "banking-support-v1"
+domain: "banking-support"
+region: "gulf-arabic"
+created: "2026-04-12"
+
+layers:
+  translation:
+    provider: http
+    model: "nllb-200-600m"
+    version: "2.1"
+    fine_tuned: true
+    dataset: "banking-terminology-gulf-v1"
+    endpoint: "http://localhost:8001/translate"
+    mode: "translated"
+    languages:
+      - ar-gulf
+      - ar-msa
+      - en
+
+  classification:
+    provider: http
+    model: "mdeberta-v3-banking"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "banking-intent-gulf-v2"
+    endpoint: "http://localhost:8002/classify"
+    intents:
+      - balance_inquiry
+      - transfer_funds
+      - bill_payment
+      - card_block
+      - loan_inquiry
+      - account_opening
+      - complaint
+      - fraud_report
+
+  orchestration:
+    provider: http
+    model: "qwen2.5-3b-banking"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "banking-workflows-v1"
+    endpoint: "http://localhost:8003/orchestrate"
+
+  execution:
+    provider: http
+    model: "functionary-small-v3"
+    version: "1.1"
+    fine_tuned: false
+    endpoint: "http://localhost:8004/execute"
+    tools:
+      - core_banking_api
+      - card_management_api
+      - transfer_api
+      - bill_pay_api
+      - loan_calculator
+      - kyc_service
+
+  generation:
+    provider: http
+    model: "qwen2.5-0.5b-banking"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "banking-communication-gulf-v1"
+    endpoint: "http://localhost:8005/generate"
+    tone: "professional"
+
+  validation:
+    provider: http
+    model: "banking-validator-v1"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "banking-compliance-policy-v1"
+    endpoint: "http://localhost:8006/validate"
+
+# ─── Hooks — domain-specific extensions ──────────────────────
+hooks:
+  fraud_detection:
+    provider: http
+    model: "fraud-scorer-v3"
+    version: "2.0"
+    point: "after:classification"
+    endpoint: "http://localhost:8010/fraud-score"
+    fine_tuned: true
+    dataset: "fraud-patterns-gulf-v4"
+
+  kyc_verification:
+    provider: http
+    model: "kyc-checker-v1"
+    version: "1.0"
+    point: "before:execution"
+    endpoint: "http://localhost:8011/kyc-verify"
+    fine_tuned: true
+    dataset: "gulf-kyc-regulations-v2"
+
+  transaction_limit_check:
+    provider: http
+    model: "limit-checker-v1"
+    version: "1.0"
+    point: "before:execution"
+    endpoint: "http://localhost:8012/limit-check"

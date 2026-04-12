@@ -1,0 +1,107 @@
+# STATUS: Blueprint only. Requires external model servers.
+# To run locally, change all providers to: dummy or ollama
+
+msm_version: "1.0"
+manifest_id: "ecommerce-retail-v1"
+domain: "ecommerce-retail"
+region: "gulf-arabic"
+created: "2026-04-12"
+
+layers:
+  translation:
+    provider: http
+    model: "nllb-200-600m"
+    version: "2.1"
+    fine_tuned: true
+    dataset: "retail-terminology-gulf-v1"
+    endpoint: "http://localhost:8001/translate"
+    mode: "translated"
+    languages:
+      - ar-gulf
+      - ar-msa
+      - en
+
+  classification:
+    provider: http
+    model: "mdeberta-v3-retail"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "retail-intent-gulf-v2"
+    endpoint: "http://localhost:8002/classify"
+    intents:
+      - product_search
+      - add_to_cart
+      - checkout
+      - track_order
+      - return_request
+      - price_inquiry
+      - size_guide
+      - complaint
+      - product_comparison
+
+  orchestration:
+    provider: http
+    model: "qwen2.5-3b-retail"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "retail-workflows-v1"
+    endpoint: "http://localhost:8003/orchestrate"
+
+  execution:
+    provider: http
+    model: "functionary-small-v3"
+    version: "1.1"
+    fine_tuned: false
+    endpoint: "http://localhost:8004/execute"
+    tools:
+      - product_catalog_api
+      - inventory_api
+      - cart_api
+      - payment_api
+      - shipping_api
+      - returns_api
+      - recommendations_engine
+
+  generation:
+    provider: http
+    model: "qwen2.5-0.5b-retail"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "retail-brand-voice-gulf-v1"
+    endpoint: "http://localhost:8005/generate"
+    tone: "friendly"
+
+  validation:
+    provider: http
+    model: "retail-validator-v1"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "retail-policy-v1"
+    endpoint: "http://localhost:8006/validate"
+
+# ─── Hooks — domain-specific extensions ──────────────────────
+hooks:
+  fraud_detection:
+    provider: http
+    model: "fraud-scorer-retail-v2"
+    version: "1.0"
+    point: "after:classification"
+    endpoint: "http://localhost:8010/fraud-score"
+    fine_tuned: true
+    dataset: "retail-fraud-patterns-v3"
+
+  image_search:
+    provider: http
+    model: "clip-retail-v1"
+    version: "1.0"
+    point: "before:classification"
+    endpoint: "http://localhost:8011/image-search"
+    fine_tuned: true
+    dataset: "product-image-catalog-v2"
+
+  personalization:
+    provider: http
+    model: "recommender-v2"
+    version: "1.0"
+    point: "after:orchestration"
+    endpoint: "http://localhost:8012/personalize"

@@ -5,3 +5,4 @@ dist/
 .DS_Store
 plan/
 *.code-workspace
+benchmark-results.json

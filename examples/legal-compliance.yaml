@@ -1,0 +1,91 @@
+# STATUS: Blueprint only. Requires external model servers.
+# To run locally, change all providers to: dummy or ollama
+
+msm_version: "1.0"
+manifest_id: "legal-compliance-v1"
+domain: "legal-compliance"
+region: "general"
+created: "2026-04-12"
+
+layers:
+  translation:
+    provider: http
+    model: "nllb-200-600m"
+    version: "2.1"
+    fine_tuned: true
+    dataset: "legal-terminology-multilingual-v1"
+    endpoint: "http://localhost:8001/translate"
+    mode: "translated"
+
+  classification:
+    provider: http
+    model: "legal-bert-v2"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "legal-intent-classification-v1"
+    endpoint: "http://localhost:8002/classify"
+    intents:
+      - contract_review
+      - compliance_check
+      - legal_research
+      - clause_extraction
+      - risk_assessment
+      - document_summary
+
+  orchestration:
+    provider: http
+    model: "qwen2.5-3b-legal"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "legal-workflow-planning-v1"
+    endpoint: "http://localhost:8003/orchestrate"
+
+  execution:
+    provider: http
+    model: "functionary-small-v3"
+    version: "1.1"
+    fine_tuned: false
+    endpoint: "http://localhost:8004/execute"
+    tools:
+      - case_law_search
+      - statute_lookup
+      - contract_db
+      - compliance_registry
+      - document_parser
+
+  generation:
+    provider: http
+    model: "qwen2.5-0.5b-legal"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "legal-writing-style-v1"
+    endpoint: "http://localhost:8005/generate"
+    tone: "formal"
+
+  validation:
+    provider: http
+    model: "legal-validator-v1"
+    version: "1.0"
+    fine_tuned: true
+    dataset: "legal-accuracy-policy-v1"
+    endpoint: "http://localhost:8006/validate"
+
+# ─── Hooks — domain-specific extensions ──────────────────────
+hooks:
+  compliance_check:
+    provider: http
+    model: "regulation-checker-v2"
+    version: "1.0"
+    point: "after:generation"
+    endpoint: "http://localhost:8010/compliance-check"
+    fine_tuned: true
+    dataset: "regulatory-frameworks-v3"
+
+  pii_detection:
+    provider: http
+    model: "pii-detector-v1"
+    version: "1.0"
+    point: "before:classification"
+    endpoint: "http://localhost:8011/pii-detect"
+    fine_tuned: true
+    dataset: "pii-legal-docs-v2"
