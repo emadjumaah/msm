@@ -28,9 +28,15 @@ export class LayerRegistry {
   private factories = new Map<string, LayerFactory>();
   private hookFactories = new Map<string, HookFactory>();
 
-  /** Register a factory for a (layer, provider) pair. */
+  /** Register a factory for a (layer, provider) pair. Throws on duplicate. */
   register(layerName: string, provider: string, factory: LayerFactory): void {
-    this.factories.set(`${layerName}:${provider}`, factory);
+    const key = `${layerName}:${provider}`;
+    if (this.factories.has(key)) {
+      throw new Error(
+        `Duplicate registration: provider "${provider}" already registered for layer "${layerName}".`,
+      );
+    }
+    this.factories.set(key, factory);
   }
 
   /** Register a hook factory for a provider name. */
@@ -48,7 +54,13 @@ export class LayerRegistry {
           `Available: ${this.listProviders(layerName).join(", ") || "none"}`,
       );
     }
-    return factory(config);
+    const layer = factory(config);
+    if (layer.name !== layerName) {
+      throw new Error(
+        `Factory for "${layerName}:${config.provider}" produced a layer with name "${layer.name}" — expected "${layerName}".`,
+      );
+    }
+    return layer;
   }
 
   /** Create a hook instance from a hook config. */
@@ -148,7 +160,7 @@ export async function getDefaultRegistry(): Promise<LayerRegistry> {
   registry.register(
     "execution",
     "ollama",
-    () => new ollama.DummyExecutionLayer(),
+    () => new dummy.DummyExecutionLayer(), // Execution is tool-calling, not LLM — intentionally uses dummy
   );
   registry.register(
     "generation",
@@ -158,7 +170,7 @@ export async function getDefaultRegistry(): Promise<LayerRegistry> {
   registry.register(
     "validation",
     "ollama",
-    () => new ollama.DummyValidationLayer(),
+    () => new dummy.DummyValidationLayer(), // Validation is policy rules, not LLM — intentionally uses dummy
   );
 
   _default = registry;

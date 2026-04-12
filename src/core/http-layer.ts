@@ -74,15 +74,9 @@ export abstract class HttpLayer<T extends LayerMeta> implements MSMLayer<T> {
       const latency = Math.round(performance.now() - start);
       return this.parseResponse(json, latency);
     } catch (err) {
-      const latency = Math.round(performance.now() - start);
-      return {
-        model_id: "http-error",
-        model_ver: "0.0.0",
-        latency_ms: latency,
-        confidence: 0,
-        status: "failed",
-        error: err instanceof Error ? err.message : String(err),
-      } as T;
+      clearTimeout(timer);
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`HttpLayer(${this.endpoint}) failed: ${message}`);
     } finally {
       clearTimeout(timer);
     }

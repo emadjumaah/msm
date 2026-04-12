@@ -4,16 +4,31 @@ import { parse as parseYaml } from "yaml";
 
 // ─── Manifest Zod Schema ────────────────────────────────────
 
-const LayerConfigSchema = z.object({
-  provider: z.string().default("dummy"), // "dummy", "ollama", or your custom provider
+const BaseLayerConfigSchema = z.object({
+  provider: z.string().default("dummy"),
   model: z.string(),
   version: z.string(),
   fine_tuned: z.boolean().default(false),
   dataset: z.string().optional(),
-  endpoint: z.string().optional(), // HTTP endpoint for real model servers
-  mode: z.enum(["translated", "native"]).optional(), // Translation layer mode
-  orchestration_mode: z.enum(["rules", "llm", "hybrid"]).optional(), // Orchestration strategy
+  endpoint: z.string().optional(),
 });
+
+const TranslationLayerConfigSchema = BaseLayerConfigSchema.extend({
+  mode: z.enum(["translated", "native"]).optional(),
+}).strict();
+
+const OrchestrationLayerConfigSchema = BaseLayerConfigSchema.extend({
+  orchestration_mode: z.enum(["rules", "llm", "hybrid"]).optional(),
+}).strict();
+
+const StandardLayerConfigSchema = BaseLayerConfigSchema.strict();
+
+/** Validates ISO 8601 date strings */
+const isoDateString = z
+  .string()
+  .refine((s) => !isNaN(Date.parse(s)), {
+    message: "Invalid date format — expected ISO 8601 (e.g. 2025-01-15)",
+  });
 
 const HOOK_POINTS = [
   "before:translation",
@@ -40,27 +55,34 @@ const HookConfigSchema = z.object({
   dataset: z.string().optional(),
 });
 
-const ManifestSchema = z.object({
-  msm_version: z.string(),
-  manifest_id: z.string(),
-  domain: z.string(),
-  region: z.string().optional(),
-  created: z.string(),
+const ManifestSchema = z
+  .object({
+    msm_version: z.string(),
+    manifest_id: z.string(),
+    domain: z.string(),
+    region: z.string().optional(),
+    created: isoDateString,
 
-  layers: z.object({
-    translation: LayerConfigSchema,
-    classification: LayerConfigSchema,
-    orchestration: LayerConfigSchema,
-    execution: LayerConfigSchema,
-    generation: LayerConfigSchema,
-    validation: LayerConfigSchema,
-  }),
+    layers: z
+      .object({
+        translation: TranslationLayerConfigSchema,
+        classification: StandardLayerConfigSchema,
+        orchestration: OrchestrationLayerConfigSchema,
+        execution: StandardLayerConfigSchema,
+        generation: StandardLayerConfigSchema,
+        validation: StandardLayerConfigSchema,
+      })
+      .strict(),
 
-  hooks: z.record(z.string(), HookConfigSchema).optional(),
-});
+    hooks: z.record(z.string(), HookConfigSchema).optional(),
+  })
+  .strict();
 
 export type MSMManifest = z.infer<typeof ManifestSchema>;
-export type LayerConfig = z.infer<typeof LayerConfigSchema>;
+export type LayerConfig =
+  | z.infer<typeof TranslationLayerConfigSchema>
+  | z.infer<typeof OrchestrationLayerConfigSchema>
+  | z.infer<typeof StandardLayerConfigSchema>;
 export type HookConfig = z.infer<typeof HookConfigSchema>;
 
 // ─── Loader ──────────────────────────────────────────────────

@@ -24,6 +24,10 @@ export interface MSMInput {
   language?: string;
   /** Conversation history for multi-turn context */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /** Translation direction hint: "outbound" signals EN→user-language translation */
+  direction?: "inbound" | "outbound";
+  /** Target language for outbound translation (e.g. "ar-gulf") */
+  target_language?: string;
 }
 
 // ─── Context Annotation (Option C: Cultural Context) ─────────

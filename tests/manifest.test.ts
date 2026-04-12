@@ -67,4 +67,62 @@ describe("Manifest Loader", () => {
   it("rejects non-existent file", async () => {
     await expect(loadManifest("/nonexistent/path.yaml")).rejects.toThrow();
   });
+
+  it("rejects manifest with unknown top-level field", () => {
+    expect(() =>
+      validateManifest({
+        msm_version: "1.0",
+        manifest_id: "test",
+        domain: "test",
+        created: "2026-01-01",
+        unknown_field: "should fail",
+        layers: {
+          translation: { model: "t", version: "1.0", mode: "native" },
+          classification: { model: "c", version: "1.0" },
+          orchestration: { model: "o", version: "1.0" },
+          execution: { model: "e", version: "1.0" },
+          generation: { model: "g", version: "1.0" },
+          validation: { model: "v", version: "1.0" },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects mode field on non-translation layer", () => {
+    expect(() =>
+      validateManifest({
+        msm_version: "1.0",
+        manifest_id: "test",
+        domain: "test",
+        created: "2026-01-01",
+        layers: {
+          translation: { model: "t", version: "1.0" },
+          classification: { model: "c", version: "1.0", mode: "native" },
+          orchestration: { model: "o", version: "1.0" },
+          execution: { model: "e", version: "1.0" },
+          generation: { model: "g", version: "1.0" },
+          validation: { model: "v", version: "1.0" },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects invalid date format", () => {
+    expect(() =>
+      validateManifest({
+        msm_version: "1.0",
+        manifest_id: "test",
+        domain: "test",
+        created: "not-a-date",
+        layers: {
+          translation: { model: "t", version: "1.0" },
+          classification: { model: "c", version: "1.0" },
+          orchestration: { model: "o", version: "1.0" },
+          execution: { model: "e", version: "1.0" },
+          generation: { model: "g", version: "1.0" },
+          validation: { model: "v", version: "1.0" },
+        },
+      }),
+    ).toThrow();
+  });
 });

@@ -53,6 +53,45 @@ export class OllamaTranslationLayer implements MSMLayer<TranslationOutput> {
   async process(payload: MSMPayload): Promise<TranslationOutput> {
     const start = performance.now();
 
+    // Outbound translation: EN → user's language (use LLM to translate back)
+    if (
+      payload.input.direction === "outbound" &&
+      payload.input.target_language
+    ) {
+      const res = await ollamaGenerate(
+        {
+          model: this.model,
+          system: `You are an English-to-Arabic translation engine. Translate the English text into Gulf Arabic. Respond ONLY with JSON: {"translated_text": "the arabic translation"}`,
+          prompt: payload.input.raw,
+          format: "json",
+          options: { temperature: 0.1 },
+        },
+        this.baseUrl,
+      );
+
+      const latency = Math.round(performance.now() - start);
+      let translatedText: string;
+      try {
+        const parsed = JSON.parse(res.response);
+        translatedText = parsed.translated_text || res.response;
+      } catch {
+        translatedText = res.response;
+      }
+
+      return {
+        translated_text: translatedText,
+        source_language: "en",
+        target_language: payload.input.target_language,
+        layer_invoked: true,
+        mode: "translated",
+        model_id: this.model,
+        model_ver: "1.0.0",
+        latency_ms: latency,
+        confidence: 0.8,
+        status: "ok",
+      };
+    }
+
     // Fast path: English input — no LLM call needed
     if (isEnglishText(payload.input.raw)) {
       return {

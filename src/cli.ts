@@ -100,25 +100,36 @@ ${c.bold}Examples:${c.reset}
 
 const [, , command, ...args] = process.argv;
 
-switch (command) {
-  case "demo":
-    cmdDemo();
-    break;
-  case "validate":
-    if (!args[0]) {
-      console.error("Usage: msm validate <manifest.yaml>");
-      process.exit(1);
-    }
-    cmdValidate(args[0]);
-    break;
-  case "trace":
-    if (!args[0] || !args[1]) {
-      console.error('Usage: msm trace <manifest.yaml> "<input text>"');
-      process.exit(1);
-    }
-    cmdTrace(args[0], args[1]);
-    break;
-  default:
-    printUsage();
-    break;
+async function main() {
+  switch (command) {
+    case "demo":
+      await cmdDemo();
+      break;
+    case "validate":
+      if (!args[0]) {
+        console.error("Usage: msm validate <manifest.yaml>");
+        process.exit(1);
+      }
+      await cmdValidate(args[0]);
+      break;
+    case "trace":
+      if (!args[0] || !args[1]) {
+        console.error('Usage: msm trace <manifest.yaml> "<input text>"');
+        process.exit(1);
+      }
+      await cmdTrace(args[0], args[1]);
+      break;
+    default:
+      printUsage();
+      break;
+  }
 }
+
+// Signal handling for graceful shutdown
+process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
+
+main().catch((err) => {
+  console.error(`${c.red}${c.bold}Error:${c.reset} ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+});

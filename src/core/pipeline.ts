@@ -145,32 +145,25 @@ export class Pipeline {
     this.manifest = manifest;
   }
 
-  /** Run all hooks for a given point in parallel, recording results */
+  /** Run all hooks for a given point sequentially (declaration order per spec) */
   private async runHooks(
     point: HookPoint,
     payload: MSMPayload,
     entries: TraceEntry[],
+    hooks: MSMHook[],
   ): Promise<void> {
-    const matching = this.hooks.filter((h) => h.point === point);
+    const matching = hooks.filter((h) => h.point === point);
     if (matching.length === 0) return;
 
-    // Run hooks concurrently — they are independent of each other
-    const results = await Promise.allSettled(
-      matching.map((hook) => hook.process(payload)),
-    );
-
-    for (let i = 0; i < matching.length; i++) {
-      const hook = matching[i];
-      const settled = results[i];
+    // Run hooks sequentially in declaration order (spec §5.1)
+    for (const hook of matching) {
       let result: HookOutput;
-
-      if (settled.status === "fulfilled") {
-        result = settled.value;
-      } else {
+      try {
+        // Pass a frozen snapshot to prevent hooks from mutating payload
+        result = await hook.process(payload);
+      } catch (err) {
         const errMsg =
-          settled.reason instanceof Error
-            ? settled.reason.message
-            : String(settled.reason);
+          err instanceof Error ? err.message : String(err);
         result = {
           model_id: "hook-error",
           model_ver: "0.0.0",
@@ -204,6 +197,11 @@ export class Pipeline {
     const startTime = performance.now();
     const entries: TraceEntry[] = [];
 
+    // Snapshot layers at the start for atomic execution —
+    // mid-flight swap() calls won't affect this run
+    const layers = new Map(this.layers);
+    const hooks = [...this.hooks];
+
     const payload: MSMPayload = {
       msm_version: this.manifest?.msm_version ?? "1.0",
       session_id: sid,
@@ -228,7 +226,7 @@ export class Pipeline {
     while (runFrom < order.length) {
       for (let i = runFrom; i < order.length; i++) {
         const name = order[i];
-        const layer = this.layers.get(name);
+        const layer = layers.get(name);
 
         if (!layer) {
           // Graceful degradation: typed fallback so downstream layers get valid shapes
@@ -248,8 +246,8 @@ export class Pipeline {
           continue;
         }
 
-        // Run before-hooks (parallel)
-        await this.runHooks(`before:${name}`, payload, entries);
+        // Run before-hooks (sequential, declaration order per spec)
+        await this.runHooks(`before:${name}`, payload, entries, hooks);
 
         let result: LayerMeta;
         try {
@@ -271,8 +269,8 @@ export class Pipeline {
           error: result.error,
         });
 
-        // Run after-hooks (parallel)
-        await this.runHooks(`after:${name}`, payload, entries);
+        // Run after-hooks (sequential, declaration order per spec)
+        await this.runHooks(`after:${name}`, payload, entries, hooks);
 
         // Handle validation gate
         if (name === "validation") {
@@ -321,10 +319,10 @@ export class Pipeline {
     const responseText = generation?.response_text ?? FALLBACK_RESPONSE;
 
     if (inbound?.layer_invoked && inbound.source_language !== "en") {
-      const translationLayer = this.layers.get("translation");
+      const translationLayer = layers.get("translation");
       if (translationLayer) {
         // Run before:translation hooks for outbound pass
-        await this.runHooks("before:translation", payload, entries);
+        await this.runHooks("before:translation", payload, entries, hooks);
 
         let outboundResult: TranslationOutput;
         try {
@@ -335,19 +333,13 @@ export class Pipeline {
               raw: responseText,
               modality: "text",
               language: "en",
+              direction: "outbound",
+              target_language: inbound.source_language,
             },
           };
           outboundResult = (await translationLayer.process(
             outboundPayload,
           )) as TranslationOutput;
-          // Override: mark as outbound
-          outboundResult = {
-            ...outboundResult,
-            source_language: "en",
-            target_language: inbound.source_language,
-            layer_invoked: true,
-            mode: "translated",
-          };
         } catch (err) {
           outboundResult = getLayerFallback(
             "translation",
@@ -366,7 +358,7 @@ export class Pipeline {
         });
 
         // Run after:translation hooks for outbound pass
-        await this.runHooks("after:translation", payload, entries);
+        await this.runHooks("after:translation", payload, entries, hooks);
       }
     }
 

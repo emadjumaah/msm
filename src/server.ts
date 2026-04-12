@@ -22,11 +22,31 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { z } from "zod";
 import { Pipeline } from "./core/pipeline.js";
 import type { PipelineTrace } from "./core/pipeline.js";
 import type { MSMLayer } from "./core/types.js";
 import { createPipeline } from "./core/registry.js";
 import { loadManifest } from "./core/manifest.js";
+
+// ─── Request schema ──────────────────────────────────────────
+
+const MAX_BODY_BYTES = 64 * 1024; // 64 KB
+
+const RunRequestSchema = z.object({
+  text: z.string().min(1, "text must be non-empty").max(4096),
+  modality: z.enum(["text", "voice", "image"]).default("text"),
+  session_id: z.string().max(256).optional(),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().max(4096),
+      }),
+    )
+    .max(50)
+    .optional(),
+});
 
 // ─── Layer Loading ───────────────────────────────────────────
 
@@ -69,7 +89,16 @@ async function buildPipeline(): Promise<{ pipeline: Pipeline; label: string }> {
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error(`Request body exceeds ${MAX_BODY_BYTES} bytes`));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString()));
     req.on("error", reject);
   });
@@ -113,22 +142,28 @@ async function main() {
     // Run pipeline
     if (url.pathname === "/api/run" && req.method === "POST") {
       try {
-        const body = JSON.parse(await readBody(req)) as {
-          text?: string;
-          modality?: "text" | "voice" | "image";
-          session_id?: string;
-          history?: Array<{ role: "user" | "assistant"; content: string }>;
-        };
-
-        if (!body.text) {
-          json(res, 400, { error: 'Missing required field: "text"' });
+        let rawBody: unknown;
+        try {
+          rawBody = JSON.parse(await readBody(req));
+        } catch {
+          json(res, 400, { error: "Invalid JSON body" });
           return;
         }
+
+        const parsed = RunRequestSchema.safeParse(rawBody);
+        if (!parsed.success) {
+          json(res, 400, {
+            error: "Validation failed",
+            details: parsed.error.issues.map((i) => i.message),
+          });
+          return;
+        }
+        const body = parsed.data;
 
         const trace: PipelineTrace = await pipeline.run(
           {
             raw: body.text,
-            modality: body.modality ?? "text",
+            modality: body.modality,
             history: body.history,
           },
           body.session_id,

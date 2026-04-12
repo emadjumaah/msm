@@ -115,6 +115,27 @@ export class DummyTranslationLayer implements MSMLayer<TranslationOutput> {
 
   async process(payload: MSMPayload): Promise<TranslationOutput> {
     const start = performance.now();
+
+    // Outbound translation: EN → user's language
+    if (
+      payload.input.direction === "outbound" &&
+      payload.input.target_language
+    ) {
+      const { text: translated } = dummyTranslate(payload.input.raw, "to_ar");
+      return {
+        translated_text: translated,
+        source_language: "en",
+        target_language: payload.input.target_language,
+        layer_invoked: true,
+        mode: "translated",
+        model_id: "dummy-translation-v1",
+        model_ver: "1.0.0",
+        latency_ms: Math.round(performance.now() - start),
+        confidence: 0.6,
+        status: "ok",
+      };
+    }
+
     const sourceLang = detectLanguage(payload.input.raw);
     const isEnglish = sourceLang === "en";
 

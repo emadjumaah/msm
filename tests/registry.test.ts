@@ -111,6 +111,41 @@ describe("LayerRegistry", () => {
     expect(all).toContainEqual({ layer: "translation", provider: "dummy" });
     expect(all).toContainEqual({ layer: "classification", provider: "ollama" });
   });
+
+  it("throws on duplicate registration", () => {
+    const registry = new LayerRegistry();
+    const stub = () => ({
+      name: "translation" as const,
+      async process() {
+        return {} as LayerMeta;
+      },
+    });
+
+    registry.register("translation", "dummy", stub);
+    expect(() => registry.register("translation", "dummy", stub)).toThrow(
+      /Duplicate registration/,
+    );
+  });
+
+  it("verifies factory produces correct layer name", () => {
+    const registry = new LayerRegistry();
+    registry.register("translation", "bad", () => ({
+      name: "classification", // wrong name!
+      async process() {
+        return {} as LayerMeta;
+      },
+    }));
+
+    const config: LayerConfig = {
+      provider: "bad",
+      model: "x",
+      version: "1.0",
+      fine_tuned: false,
+    };
+    expect(() => registry.create("translation", config)).toThrow(
+      /produced a layer with name "classification"/,
+    );
+  });
 });
 
 // ─── Default Registry ────────────────────────────────────────

@@ -569,8 +569,9 @@ describe("Outbound Translation", () => {
 
     // Final output should be in the user's language
     expect(trace.payload.final_output?.language).toBe("ar-gulf");
-    // Outbound translation should produce Arabic text
-    expect(trace.payload.outbound_translation?.translated_text).toBeDefined();
+    // Outbound translation should produce non-empty Arabic text
+    expect(trace.payload.outbound_translation?.translated_text).toEqual(expect.any(String));
+    expect(trace.payload.outbound_translation!.translated_text!.length).toBeGreaterThan(0);
   });
 });
 
@@ -642,10 +643,10 @@ describe("Session History", () => {
   });
 });
 
-// ─── Parallel Hooks ──────────────────────────────────────────
+// ─── Sequential Hooks (spec compliance) ─────────────────────
 
-describe("Parallel Hook Execution", () => {
-  it("runs multiple hooks at the same point concurrently", async () => {
+describe("Sequential Hook Execution", () => {
+  it("runs multiple hooks at the same point in declaration order", async () => {
     const pipeline = buildPipeline();
     const executionOrder: string[] = [];
 
@@ -694,8 +695,7 @@ describe("Parallel Hook Execution", () => {
     // Both hooks should have run
     expect(trace.payload.hooks?.["hook_a"]).toBeDefined();
     expect(trace.payload.hooks?.["hook_b"]).toBeDefined();
-    // Both should start before either finishes (parallel execution)
-    expect(executionOrder[0]).toBe("a_start");
-    expect(executionOrder[1]).toBe("b_start");
+    // Sequential: a completes before b starts (declaration order per spec)
+    expect(executionOrder).toEqual(["a_start", "a_end", "b_start", "b_end"]);
   });
 });
