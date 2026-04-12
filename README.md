@@ -419,7 +419,8 @@ pipeline.addHook({
 - Hooks **never break the pipeline** — if a hook fails, it's recorded and the pipeline continues
 - Hook output is stored in `payload.hooks["hook_name"]` — downstream layers can read it
 - Hooks appear in the trace alongside core layers
-- Multiple hooks can run at the same point
+- Multiple hooks at the same point run **sequentially in declaration order** (spec §5.1)
+- Hooks receive a `structuredClone` of the payload — they cannot mutate the live pipeline state
 - Available points: `before:translation`, `after:translation`, `before:classification`, `after:classification`, etc.
 
 ### Domain examples
@@ -449,9 +450,15 @@ MSM_PORT=8080 pnpm server                            # custom port
 {
   "text": "ابي اطلب برغر وبيبسي",
   "modality": "text",
-  "session_id": "optional-session-id"
+  "session_id": "optional-session-id",
+  "history": [
+    { "role": "user", "content": "What's on your menu?" },
+    { "role": "assistant", "content": "We have burgers, pizza, and more." }
+  ]
 }
 ```
+
+All fields except `text` are optional. Request body is validated with Zod (max 4096 chars per field, max 50 history entries, 64KB body limit).
 
 Response:
 
@@ -498,6 +505,12 @@ Response:
     {
       "layer": "validation",
       "model_id": "dummy-validation-v1",
+      "latency_ms": 0,
+      "status": "ok"
+    },
+    {
+      "layer": "outbound_translation",
+      "model_id": "dummy-translation-v1",
       "latency_ms": 0,
       "status": "ok"
     }
@@ -583,10 +596,10 @@ msm/
 │   ├── cli.ts                ← CLI: msm demo / validate / trace
 │   └── index.ts              ← Public API (all exports)
 ├── tests/
-│   ├── pipeline.test.ts      ← 27 pipeline tests
-│   ├── manifest.test.ts      ← 6 manifest tests
-│   ├── registry.test.ts      ← 9 registry tests
-│   └── hooks.test.ts         ← 9 hook tests (51 total)
+│   ├── pipeline.test.ts      ← 36 pipeline tests
+│   ├── manifest.test.ts      ← 9 manifest tests
+│   ├── registry.test.ts      ← 11 registry tests
+│   └── hooks.test.ts         ← 9 hook tests (65 total)
 ├── examples/                 ← Domain manifests (like docker-compose files)
 │   ├── food-commerce-gulf-dummy.yaml
 │   ├── food-commerce-gulf-ollama.yaml
@@ -646,14 +659,18 @@ Results are saved to `benchmark-results.json` for programmatic use.
 
 ## Pipeline Guarantees
 
-- **Outbound translation** — non-English users automatically receive responses in their language
+- **Outbound translation** — non-English users automatically receive responses in their language (direction-aware: translation layers receive `direction: "outbound"` + `target_language`)
 - **Typed fallbacks** — if a layer fails, downstream layers get valid typed defaults (e.g. `intent: "unknown"`, `domain: "general"`), not bare error objects
 - **Graceful degradation** — if a layer or hook fails, pipeline continues with a recorded failure
-- **Validation gate** — `block` unsafe responses (fallback) or `retry` generation
+- **Validation gate** — `block` unsafe responses (fallback) or `retry` generation (with `_validation_feedback` injected so generation knows WHY the previous attempt was rejected)
 - **Full trace** — every request has per-layer model IDs, latency, confidence, and status (including hooks and outbound translation)
+- **Atomic runs** — `run()` snapshots layers and hooks at start, so mid-flight `swap()` calls don't affect in-progress requests
 - **Hot swap** — replace any layer at runtime without restarting
-- **Parallel hooks** — multiple hooks at the same point run concurrently via `Promise.allSettled()`
+- **Sequential hooks** — multiple hooks at the same point run in declaration order per spec, with `structuredClone` isolation (hooks cannot mutate the live payload)
 - **Session history** — `input.history` carries multi-turn conversation context through the pipeline
+- **Strict manifests** — per-layer Zod schemas with `.strict()`, ISO 8601 date validation, unknown fields rejected
+- **Hardened server** — Zod request validation, 64KB body limit, 10s read timeout (slowloris protection)
+- **Registry guards** — duplicate registration throws, factory output verified against requested layer name
 - **Extensible** — add domain-specific hooks without changing the 6 core layers
 
 ---
@@ -672,15 +689,21 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - [x] Graceful degradation + validation gate
 - [x] Typed layer fallbacks (downstream layers get valid shapes on failure)
 - [x] Outbound translation (auto English → user’s language)
-- [x] Parallel hook execution
+- [x] Sequential hook execution (declaration order per spec, structuredClone isolation)
 - [x] Session history (multi-turn conversation context)
 - [x] Hooks system (domain extensions without core changes)
 - [x] CLI (demo / validate / trace)
-- [x] 58+ tests passing
+- [x] 65 tests passing
 - [x] Benchmark suite (latency, accuracy per layer)
 - [x] 8 domain manifests (food, healthcare, sports, legal, banking, education, e-commerce)
+- [x] Strict manifest validation (per-layer Zod schemas, ISO 8601 dates)
+- [x] Hardened server (Zod validation, body limits, read timeout)
+- [x] Registry guards (duplicate detection, factory verification)
+- [x] Atomic pipeline runs (layer/hook snapshots)
+- [x] Retry feedback (validation violations fed back to generation)
+- [x] Ollama client timeout (30s AbortController)
 - [ ] Production model examples (NLLB, Functionary)
-- [x] npm publish (`msm-ai` on npm)
+- [x] npm publish (`msm-ai` on npm, v1.2.0)
 - [ ] Fine-tuning guide for domain-specific models
 - [ ] Streaming output (Time-to-First-Token)
 - [ ] Observability dashboard (per-layer trace visualization)
