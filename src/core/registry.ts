@@ -219,12 +219,6 @@ export async function createPipeline(
   const registry = options?.registry ?? (await getDefaultRegistry());
   const pipelineOpts: PipelineOptions = {
     ...options?.pipelineOptions,
-    // Manifest pipeline config is the base; explicit pipelineOptions override
-    mode: options?.pipelineOptions?.mode ?? manifest.pipeline?.mode ?? "linear",
-    maxIterations:
-      options?.pipelineOptions?.maxIterations ??
-      manifest.pipeline?.max_iterations ??
-      6,
   };
   const pipeline = new Pipeline(pipelineOpts);
   pipeline.setManifest(manifest);

@@ -18,6 +18,7 @@ import type {
   OrchestrationAction,
   MSMHook,
   HookOutput,
+  ToolResult,
 } from "../src/core/types.js";
 
 function buildPipeline() {
@@ -34,12 +35,9 @@ function buildPipeline() {
 // ─── Pipeline ────────────────────────────────────────────────
 
 describe("Pipeline", () => {
-  it("runs all 6 layers end-to-end", async () => {
+  it("runs all 6 layers for a greeting (action=respond)", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({
-      raw: "I want to order a burger",
-      modality: "text",
-    });
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
     expect(trace.entries).toHaveLength(6);
     expect(trace.payload.translation).toBeDefined();
@@ -49,6 +47,23 @@ describe("Pipeline", () => {
     expect(trace.payload.generation).toBeDefined();
     expect(trace.payload.validation).toBeDefined();
     expect(trace.payload.final_output).toBeDefined();
+  });
+
+  it("returns early with 3 layers for use_tool action", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({
+      raw: "I want to order a burger",
+      modality: "text",
+    });
+
+    // translate → classify → orchestrate → early return (use_tool)
+    expect(trace.entries).toHaveLength(3);
+    expect(trace.payload.orchestration?.action).toBe("use_tool");
+    expect(trace.payload.final_output?.action_required).toBe(true);
+    expect(trace.payload.final_output?.text).toBe("");
+    // No generation or validation
+    expect(trace.payload.generation).toBeUndefined();
+    expect(trace.payload.validation).toBeUndefined();
   });
 
   it("produces a valid trace with IDs and timing", async () => {
@@ -77,7 +92,7 @@ describe("Pipeline", () => {
 
   it("all layer entries have ok status with dummy models", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({ raw: "order pizza", modality: "text" });
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
     for (const entry of trace.entries) {
       expect(entry.status).toBe("ok");
@@ -182,26 +197,59 @@ describe("Orchestration Layer", () => {
       trace.payload.orchestration?.workflow_steps.length,
     );
   });
-});
 
-// ─── Execution Layer ─────────────────────────────────────────
-
-describe("Execution Layer", () => {
-  it("returns tool results for each selected tool", async () => {
+  it("returns action, tool_name, tool_params, plan for use_tool", async () => {
     const pipeline = buildPipeline();
     const trace = await pipeline.run({
       raw: "order a burger",
       modality: "text",
     });
 
-    const tools = trace.payload.orchestration?.tool_selections ?? [];
-    const results = trace.payload.execution?.tool_results ?? [];
+    expect(trace.payload.orchestration?.action).toBe("use_tool");
+    expect(trace.payload.orchestration?.tool_name).toBeDefined();
+    expect(trace.payload.orchestration?.tool_params).toBeDefined();
+    expect(trace.payload.orchestration?.plan).toBeDefined();
+    expect(trace.payload.orchestration!.plan!.length).toBeGreaterThan(0);
+    expect(trace.payload.orchestration!.plan![0].status).toBe("current");
+  });
 
-    expect(results.length).toBe(tools.length);
-    for (const r of results) {
-      expect(r.status).toBe("ok");
-      expect(r.result).toBeDefined();
-    }
+  it("returns action=respond with no plan for greetings", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+
+    expect(trace.payload.orchestration?.action).toBe("respond");
+    expect(trace.payload.orchestration?.plan).toBeUndefined();
+    expect(trace.payload.orchestration?.tool_name).toBeUndefined();
+  });
+
+  it("switches to respond when tool_results are provided", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({
+      raw: "order a burger",
+      modality: "text",
+      tool_results: [
+        { tool: "menu_api", status: "ok", result: { items: ["Burger"] } },
+      ],
+    });
+
+    // With tool_results, orchestration should say "respond"
+    expect(trace.payload.orchestration?.action).toBe("respond");
+    // Pipeline should proceed through all 6 layers
+    expect(trace.entries).toHaveLength(6);
+  });
+});
+
+// ─── Execution Layer ─────────────────────────────────────────
+
+describe("Execution Layer", () => {
+  it("returns tool results for each selected tool (greeting path)", async () => {
+    const pipeline = buildPipeline();
+    // greeting → respond → full pipeline including execution
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
+
+    // greeting has no tools, so execution returns empty results
+    expect(trace.payload.execution).toBeDefined();
+    expect(trace.payload.execution?.tool_results).toBeDefined();
   });
 });
 
@@ -210,10 +258,7 @@ describe("Execution Layer", () => {
 describe("Generation Layer", () => {
   it("produces non-empty response text", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({
-      raw: "order a pizza",
-      modality: "text",
-    });
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
     expect(trace.payload.generation?.response_text.length).toBeGreaterThan(0);
     expect(trace.payload.generation?.word_count).toBeGreaterThan(0);
@@ -225,10 +270,7 @@ describe("Generation Layer", () => {
 describe("Validation Layer", () => {
   it("passes valid responses", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({
-      raw: "order a burger",
-      modality: "text",
-    });
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
     expect(trace.payload.validation?.passed).toBe(true);
     expect(trace.payload.validation?.action).toBe("release");
@@ -239,15 +281,12 @@ describe("Validation Layer", () => {
 // ─── Payload Accumulation ────────────────────────────────────
 
 describe("Payload Accumulation", () => {
-  it("payload accumulates all layer results", async () => {
+  it("payload accumulates all layer results for respond action", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({
-      raw: "ابي اطلب برغر وبيبسي",
-      modality: "text",
-    });
+    // Use greeting — respond action → full pipeline
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
     const p = trace.payload;
 
-    // Every layer should have model metadata
     expect(p.translation?.model_id).toBeTruthy();
     expect(p.classification?.model_id).toBeTruthy();
     expect(p.orchestration?.model_id).toBeTruthy();
@@ -255,9 +294,27 @@ describe("Payload Accumulation", () => {
     expect(p.generation?.model_id).toBeTruthy();
     expect(p.validation?.model_id).toBeTruthy();
 
-    // Final output should exist
     expect(p.final_output?.text.length).toBeGreaterThan(0);
     expect(p.final_output?.total_latency_ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("payload accumulates only 3 layers for use_tool action", async () => {
+    const pipeline = buildPipeline();
+    const trace = await pipeline.run({
+      raw: "I want to order a burger",
+      modality: "text",
+    });
+    const p = trace.payload;
+
+    expect(p.translation?.model_id).toBeTruthy();
+    expect(p.classification?.model_id).toBeTruthy();
+    expect(p.orchestration?.model_id).toBeTruthy();
+    // Skipped
+    expect(p.execution).toBeUndefined();
+    expect(p.generation).toBeUndefined();
+    expect(p.validation).toBeUndefined();
+    // action_required
+    expect(p.final_output?.action_required).toBe(true);
   });
 
   it("each layer has confidence between 0 and 1", async () => {
@@ -276,17 +333,33 @@ describe("Payload Accumulation", () => {
 describe("Graceful Degradation", () => {
   it("continues when a layer is missing (records failure)", async () => {
     const pipeline = new Pipeline();
-    // Only register some layers — skip classification
     pipeline.register(new DummyTranslationLayer());
     // skip classification
-    pipeline.register(new DummyOrchestrationLayer());
+    // Use a responding orchestration so pipeline goes through all layers
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "respond",
+          workflow_steps: ["respond"],
+          tool_selections: [],
+          estimated_steps: 1,
+          mode: "rules",
+          model_id: "test-orch",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
     pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
     const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
-    // Pipeline should still complete
+    // Pipeline should still complete — 6 entries (translate, classify-fallback, orchestrate, exec, gen, val)
     expect(trace.entries).toHaveLength(6);
     const classEntry = trace.entries.find((e) => e.layer === "classification");
     expect(classEntry?.status).toBe("failed");
@@ -296,7 +369,7 @@ describe("Graceful Degradation", () => {
   it("continues when a layer throws an error", async () => {
     const pipeline = buildPipeline();
 
-    // Swap in a broken layer
+    // Swap in a broken orchestration that falls back to "respond"
     const brokenLayer: MSMLayer = {
       name: "orchestration",
       async process(): Promise<never> {
@@ -307,6 +380,7 @@ describe("Graceful Degradation", () => {
 
     const trace = await pipeline.run({ raw: "order food", modality: "text" });
 
+    // Orchestration fallback has action="respond" → full pipeline
     expect(trace.entries).toHaveLength(6);
     const orchEntry = trace.entries.find((e) => e.layer === "orchestration");
     expect(orchEntry?.status).toBe("failed");
@@ -342,7 +416,8 @@ describe("Validation Gate", () => {
     };
     pipeline.swap(blockingValidator);
 
-    const trace = await pipeline.run({ raw: "order food", modality: "text" });
+    // Use greeting → respond → reaches validation
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
     // Final output should be the fallback message
     expect(trace.payload.final_output?.text).toContain("sorry");
@@ -354,7 +429,24 @@ describe("Validation Gate", () => {
     const pipeline = new Pipeline({ maxRetries: 2 });
     pipeline.register(new DummyTranslationLayer());
     pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyOrchestrationLayer());
+    // Custom orchestration that always responds
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "respond",
+          workflow_steps: ["respond"],
+          tool_selections: [],
+          estimated_steps: 1,
+          mode: "rules",
+          model_id: "test-orch",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
     pipeline.register(new DummyExecutionLayer());
 
     // Custom generation that counts calls
@@ -363,7 +455,7 @@ describe("Validation Gate", () => {
       async process(): Promise<GenerationOutput> {
         callCount++;
         return {
-          response_text: `Response attempt ${callCount}`,
+          response_text: "Response attempt " + callCount,
           tone: "warm",
           word_count: 3,
           model_id: "counting-gen",
@@ -533,17 +625,14 @@ describe("Translation Mode", () => {
 describe("Outbound Translation", () => {
   it("translates response back for Arabic input", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({
-      raw: "ابي اطلب برغر",
-      modality: "text",
-    });
+    // Arabic greeting → respond → full pipeline → outbound translation
+    const trace = await pipeline.run({ raw: "مرحبا", modality: "text" });
 
-    // Should have 7 entries: 6 core + 1 outbound translation
+    // 6 core + 1 outbound translation = 7
     expect(trace.entries).toHaveLength(7);
     expect(trace.payload.outbound_translation).toBeDefined();
     expect(trace.payload.outbound_translation?.layer_invoked).toBe(true);
     expect(trace.payload.outbound_translation?.target_language).toBe("ar-gulf");
-    // Outbound entry appears in trace
     const outboundEntry = trace.entries.find(
       (e) => e.layer === "outbound_translation",
     );
@@ -553,32 +642,37 @@ describe("Outbound Translation", () => {
 
   it("skips outbound translation for English input", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({
-      raw: "I want a burger",
-      modality: "text",
-    });
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
-    // Should have 6 entries: no outbound translation needed
+    // 6 entries, no outbound translation
     expect(trace.entries).toHaveLength(6);
     expect(trace.payload.outbound_translation).toBeUndefined();
   });
 
   it("final_output uses outbound translated text for Arabic", async () => {
     const pipeline = buildPipeline();
-    const trace = await pipeline.run({
-      raw: "ابي اطلب برغر",
-      modality: "text",
-    });
+    const trace = await pipeline.run({ raw: "مرحبا", modality: "text" });
 
-    // Final output should be in the user's language
     expect(trace.payload.final_output?.language).toBe("ar-gulf");
-    // Outbound translation should produce non-empty Arabic text
     expect(trace.payload.outbound_translation?.translated_text).toEqual(
       expect.any(String),
     );
     expect(
       trace.payload.outbound_translation!.translated_text!.length,
     ).toBeGreaterThan(0);
+  });
+
+  it("skips outbound translation when use_tool (early return)", async () => {
+    const pipeline = buildPipeline();
+    // Arabic order → use_tool → early return, no outbound translation
+    const trace = await pipeline.run({
+      raw: "ابي اطلب برغر",
+      modality: "text",
+    });
+
+    expect(trace.payload.orchestration?.action).toBe("use_tool");
+    expect(trace.payload.outbound_translation).toBeUndefined();
+    expect(trace.entries).toHaveLength(3);
   });
 });
 
@@ -588,15 +682,14 @@ describe("Typed Fallbacks", () => {
   it("produces typed classification fallback when layer is missing", async () => {
     const pipeline = new Pipeline();
     pipeline.register(new DummyTranslationLayer());
-    // Skip classification — don't register it
+    // Skip classification
     pipeline.register(new DummyOrchestrationLayer());
     pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
-    const trace = await pipeline.run({ raw: "order food", modality: "text" });
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
-    // Classification should have typed fallback fields
     expect(trace.payload.classification?.intent).toBe("unknown");
     expect(trace.payload.classification?.domain).toBe("general");
     expect(trace.payload.classification?.urgency).toBe("normal");
@@ -620,7 +713,7 @@ describe("Typed Fallbacks", () => {
     ]);
     expect(trace.payload.orchestration?.tool_selections).toEqual([]);
     expect(trace.payload.orchestration?.status).toBe("failed");
-    // Pipeline still completes
+    // Pipeline still completes (fallback action="respond")
     expect(trace.payload.final_output).toBeDefined();
   });
 });
@@ -639,7 +732,7 @@ describe("Session History", () => {
     ];
 
     const trace = await pipeline.run({
-      raw: "I'll have a burger",
+      raw: "hello",
       modality: "text",
       history,
     });
@@ -662,7 +755,6 @@ describe("Sequential Hook Execution", () => {
       point: "before:classification",
       async process(): Promise<HookOutput> {
         executionOrder.push("a_start");
-        // Simulate async work
         await new Promise((r) => setTimeout(r, 10));
         executionOrder.push("a_end");
         return {
@@ -702,7 +794,6 @@ describe("Sequential Hook Execution", () => {
     // Both hooks should have run
     expect(trace.payload.hooks?.["hook_a"]).toBeDefined();
     expect(trace.payload.hooks?.["hook_b"]).toBeDefined();
-    // Sequential: a completes before b starts (declaration order per spec)
     expect(executionOrder).toEqual(["a_start", "a_end", "b_start", "b_end"]);
   });
 });
@@ -717,7 +808,6 @@ describe("Hook Isolation", () => {
       name: "mutator",
       point: "after:translation",
       async process(payload: MSMPayload): Promise<HookOutput> {
-        // Attempt to corrupt the payload
         (payload as Record<string, unknown>).input = {
           raw: "HACKED",
           modality: "text",
@@ -739,7 +829,6 @@ describe("Hook Isolation", () => {
       modality: "text",
     });
 
-    // The real payload input should be untouched
     expect(trace.payload.input.raw).toBe("ابي اطلب برغر");
   });
 });
@@ -753,7 +842,24 @@ describe("Retry Feedback", () => {
     const pipeline = new Pipeline({ maxRetries: 1 });
     pipeline.register(new DummyTranslationLayer());
     pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyOrchestrationLayer());
+    // Orchestration that always responds
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "respond",
+          workflow_steps: ["respond"],
+          tool_selections: [],
+          estimated_steps: 1,
+          mode: "rules",
+          model_id: "test-orch",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
     pipeline.register(new DummyExecutionLayer());
 
     const spyGen: MSMLayer<GenerationOutput> = {
@@ -797,7 +903,6 @@ describe("Retry Feedback", () => {
 
     await pipeline.run({ raw: "hello", modality: "text" });
 
-    // On the retry call, generation should have seen the feedback
     expect(feedbackSeen).toBeDefined();
     expect((feedbackSeen as { violations: string[] }).violations).toContain(
       "toxic_content",
@@ -820,11 +925,29 @@ describe("Pipeline Status", () => {
     const pipeline = new Pipeline();
     pipeline.register(new DummyTranslationLayer());
     // skip classification
-    pipeline.register(new DummyOrchestrationLayer());
+    // Use a responding orchestration so pipeline completes all layers
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "respond",
+          workflow_steps: ["respond"],
+          tool_selections: [],
+          estimated_steps: 1,
+          mode: "rules",
+          model_id: "test-orch",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
     pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
+    // greeting → respond → full pipeline → classification is "failed" → degraded
     const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
     expect(trace.payload.final_output?.pipeline_status).toBe("degraded");
@@ -856,7 +979,6 @@ describe("Hook Direction Filtering", () => {
     const inboundOnlyHook: MSMHook = {
       name: "inbound_hook",
       point: "before:translation",
-      // direction defaults to "inbound"
       async process(): Promise<HookOutput> {
         hookCallCount++;
         return {
@@ -871,10 +993,10 @@ describe("Hook Direction Filtering", () => {
     };
     pipeline.addHook(inboundOnlyHook);
 
-    // Arabic input triggers outbound translation
-    await pipeline.run({ raw: "ابي اطلب برغر", modality: "text" });
+    // Arabic greeting → respond → outbound translation
+    await pipeline.run({ raw: "مرحبا", modality: "text" });
 
-    // Hook should fire once (inbound pass only), not twice
+    // Hook fires once (inbound pass only)
     expect(hookCallCount).toBe(1);
   });
 
@@ -900,10 +1022,9 @@ describe("Hook Direction Filtering", () => {
     };
     pipeline.addHook(outboundHook);
 
-    // Arabic input triggers outbound translation
-    await pipeline.run({ raw: "ابي اطلب برغر", modality: "text" });
+    // Arabic greeting → respond → outbound translation
+    await pipeline.run({ raw: "مرحبا", modality: "text" });
 
-    // Hook should fire once (outbound pass only)
     expect(hookCallCount).toBe(1);
   });
 
@@ -929,9 +1050,9 @@ describe("Hook Direction Filtering", () => {
     };
     pipeline.addHook(bothHook);
 
-    await pipeline.run({ raw: "ابي اطلب برغر", modality: "text" });
+    // Arabic greeting → respond → outbound translation
+    await pipeline.run({ raw: "مرحبا", modality: "text" });
 
-    // Hook should fire twice (once inbound, once outbound)
     expect(hookCallCount).toBe(2);
   });
 });
@@ -943,7 +1064,24 @@ describe("Pipeline Status: failed", () => {
     const pipeline = new Pipeline();
     pipeline.register(new DummyTranslationLayer());
     pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyOrchestrationLayer());
+    // Orchestration that responds
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "respond",
+          workflow_steps: ["respond"],
+          tool_selections: [],
+          estimated_steps: 1,
+          mode: "rules",
+          model_id: "test",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
     pipeline.register(new DummyExecutionLayer());
     // no generation layer
     pipeline.register(new DummyValidationLayer());
@@ -974,7 +1112,24 @@ describe("TraceEntry retry_attempt", () => {
     const pipeline = new Pipeline({ maxRetries: 1 });
     pipeline.register(new DummyTranslationLayer());
     pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyOrchestrationLayer());
+    // Orchestration that responds so we reach generation
+    pipeline.register({
+      name: "orchestration",
+      async process(): Promise<OrchestrationOutput> {
+        return {
+          action: "respond",
+          workflow_steps: ["respond"],
+          tool_selections: [],
+          estimated_steps: 1,
+          mode: "rules",
+          model_id: "test",
+          model_ver: "1.0",
+          latency_ms: 0,
+          confidence: 1,
+          status: "ok",
+        };
+      },
+    });
     pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register({
@@ -1008,15 +1163,13 @@ describe("TraceEntry retry_attempt", () => {
       },
     });
 
-    const trace = await pipeline.run({ raw: "test", modality: "text" });
+    const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
-    // First-pass entries should NOT have retry_attempt
     const firstGen = trace.entries.find(
       (e) => e.layer === "generation" && !e.retry_attempt,
     );
     expect(firstGen).toBeDefined();
 
-    // Retry-pass entries SHOULD have retry_attempt
     const retryEntries = trace.entries.filter((e) => e.retry_attempt === 1);
     expect(retryEntries.length).toBeGreaterThan(0);
   });
@@ -1097,7 +1250,6 @@ describe("AbortSignal", () => {
         name,
         async process() {
           layersRun++;
-          // Abort after first layer
           if (layersRun === 1) controller.abort();
           return {
             model_id: name,
@@ -1113,7 +1265,6 @@ describe("AbortSignal", () => {
     await expect(
       pipeline.run({ raw: "hello", modality: "text" }),
     ).rejects.toThrow("Pipeline aborted");
-    // Only 1 layer should have run before abort was checked
     expect(layersRun).toBe(1);
   });
 });
@@ -1168,172 +1319,51 @@ describe("Tone type", () => {
   });
 });
 
-// ─── Iterative Mode ──────────────────────────────────────────
+// ─── Agent Loop Pattern (brain as single-pass decision layer) ─
 
-function buildIterativePipeline() {
-  const pipeline = new Pipeline({ mode: "iterative", maxIterations: 6 });
-  pipeline.register(new DummyTranslationLayer());
-  pipeline.register(new DummyClassificationLayer());
-  pipeline.register(new DummyOrchestrationLayer());
-  pipeline.register(new DummyExecutionLayer());
-  pipeline.register(new DummyGenerationLayer());
-  pipeline.register(new DummyValidationLayer());
-  return pipeline;
-}
-
-describe("Iterative Mode", () => {
-  it("runs translate → classify → [orchestrate → execute] → generate → validate", async () => {
-    const pipeline = buildIterativePipeline();
+describe("Agent Loop Pattern", () => {
+  it("first call returns use_tool with tool_name and plan", async () => {
+    const pipeline = buildPipeline();
     const trace = await pipeline.run({
       raw: "I want to order a burger",
       modality: "text",
     });
 
-    // Should have all outputs
-    expect(trace.payload.translation).toBeDefined();
-    expect(trace.payload.classification).toBeDefined();
-    expect(trace.payload.orchestration).toBeDefined();
-    expect(trace.payload.execution).toBeDefined();
-    expect(trace.payload.generation).toBeDefined();
-    expect(trace.payload.validation).toBeDefined();
-    expect(trace.payload.final_output).toBeDefined();
-    expect(trace.payload.final_output?.iterations_used).toBeGreaterThan(0);
+    expect(trace.payload.orchestration?.action).toBe("use_tool");
+    expect(trace.payload.orchestration?.tool_name).toBeDefined();
+    expect(trace.payload.orchestration?.tool_params).toBeDefined();
+    expect(trace.payload.orchestration?.plan).toBeDefined();
+    expect(trace.payload.final_output?.action_required).toBe(true);
+    // No generation — brain is requesting a tool
+    expect(trace.payload.generation).toBeUndefined();
   });
 
-  it("records iterations in payload.iterations", async () => {
-    const pipeline = buildIterativePipeline();
+  it("second call with tool_results returns respond with generation", async () => {
+    const pipeline = buildPipeline();
     const trace = await pipeline.run({
       raw: "I want to order a burger",
       modality: "text",
-    });
-
-    // place_order intent → action "use_tool" → 1 iteration recorded, then "respond"
-    expect(trace.payload.iterations).toBeDefined();
-    expect(trace.payload.iterations!.length).toBeGreaterThanOrEqual(1);
-    expect(trace.payload.iterations![0].orchestration).toBeDefined();
-    expect(trace.payload.iterations![0].execution).toBeDefined();
-  });
-
-  it("stops iterating when action is 'respond'", async () => {
-    const pipeline = new Pipeline({ mode: "iterative", maxIterations: 6 });
-    pipeline.register(new DummyTranslationLayer());
-    pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyExecutionLayer());
-    pipeline.register(new DummyGenerationLayer());
-    pipeline.register(new DummyValidationLayer());
-
-    // Custom orchestration: respond immediately (no tools)
-    pipeline.register({
-      name: "orchestration",
-      async process(): Promise<OrchestrationOutput> {
-        return {
-          action: "respond",
-          workflow_steps: ["direct_response"],
-          tool_selections: [],
-          estimated_steps: 1,
-          mode: "rules",
-          model_id: "test",
-          model_ver: "1.0",
-          latency_ms: 0,
-          confidence: 1,
+      tool_results: [
+        {
+          tool: "menu_api",
           status: "ok",
-        };
-      },
+          result: { items: ["Classic Burger", "Pepsi"], available: true },
+        },
+      ],
     });
 
-    const trace = await pipeline.run({ raw: "hello", modality: "text" });
-
-    // No iterations — went straight to respond
-    expect(trace.payload.iterations).toEqual([]);
-    expect(trace.payload.final_output?.iterations_used).toBe(1);
+    // With tool_results, orchestration responds
+    expect(trace.payload.orchestration?.action).toBe("respond");
+    expect(trace.payload.final_output?.action_required).toBeUndefined();
+    // Generation should produce output
+    expect(trace.payload.generation?.response_text.length).toBeGreaterThan(0);
+    expect(trace.payload.validation?.passed).toBe(true);
   });
 
-  it("loops multiple times when orchestration keeps saying use_tool", async () => {
-    let orchCalls = 0;
-    const pipeline = new Pipeline({ mode: "iterative", maxIterations: 4 });
+  it("escalation returns immediately with response", async () => {
+    const pipeline = new Pipeline();
     pipeline.register(new DummyTranslationLayer());
     pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyExecutionLayer());
-    pipeline.register(new DummyGenerationLayer());
-    pipeline.register(new DummyValidationLayer());
-
-    pipeline.register({
-      name: "orchestration",
-      async process(): Promise<OrchestrationOutput> {
-        orchCalls++;
-        // First 2 calls: use_tool. Third call: respond.
-        const action: OrchestrationAction =
-          orchCalls < 3 ? "use_tool" : "respond";
-        return {
-          action,
-          workflow_steps: [`step_${orchCalls}`],
-          tool_selections: orchCalls < 3 ? ["test_api"] : [],
-          estimated_steps: 1,
-          mode: "llm",
-          model_id: "test",
-          model_ver: "1.0",
-          latency_ms: 0,
-          confidence: 0.9,
-          status: "ok",
-          reasoning: `iteration ${orchCalls}`,
-        };
-      },
-    });
-
-    const trace = await pipeline.run({ raw: "complex task", modality: "text" });
-
-    expect(orchCalls).toBe(3); // 2 tool iterations + 1 final respond
-    expect(trace.payload.iterations!.length).toBe(2); // 2 recorded iterations
-    expect(trace.payload.final_output?.iterations_used).toBe(3);
-  });
-
-  it("respects maxIterations limit", async () => {
-    let orchCalls = 0;
-    const pipeline = new Pipeline({ mode: "iterative", maxIterations: 2 });
-    pipeline.register(new DummyTranslationLayer());
-    pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyExecutionLayer());
-    pipeline.register(new DummyGenerationLayer());
-    pipeline.register(new DummyValidationLayer());
-
-    pipeline.register({
-      name: "orchestration",
-      async process(): Promise<OrchestrationOutput> {
-        orchCalls++;
-        return {
-          action: "use_tool", // always wants more tools
-          workflow_steps: [`step_${orchCalls}`],
-          tool_selections: ["test_api"],
-          estimated_steps: 1,
-          mode: "llm",
-          model_id: "test",
-          model_ver: "1.0",
-          latency_ms: 0,
-          confidence: 0.9,
-          status: "ok",
-        };
-      },
-    });
-
-    const trace = await pipeline.run({
-      raw: "infinite task",
-      modality: "text",
-    });
-
-    // Should stop at maxIterations even though orchestration keeps requesting tools
-    expect(orchCalls).toBe(2);
-    expect(trace.payload.generation).toBeDefined();
-    expect(trace.payload.final_output).toBeDefined();
-  });
-
-  it("handles escalate action from orchestration", async () => {
-    const pipeline = new Pipeline({ mode: "iterative" });
-    pipeline.register(new DummyTranslationLayer());
-    pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyExecutionLayer());
-    pipeline.register(new DummyGenerationLayer());
-    pipeline.register(new DummyValidationLayer());
-
     pipeline.register({
       name: "orchestration",
       async process(): Promise<OrchestrationOutput> {
@@ -1343,93 +1373,44 @@ describe("Iterative Mode", () => {
           tool_selections: [],
           estimated_steps: 0,
           mode: "llm",
+          reasoning: "Customer complaint — escalating",
           model_id: "test",
           model_ver: "1.0",
           latency_ms: 0,
           confidence: 0.95,
           status: "ok",
-          reasoning: "User is angry, escalating to human",
         };
       },
     });
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
 
     const trace = await pipeline.run({
       raw: "I want my money back NOW",
       modality: "text",
     });
 
-    // Should NOT have any execution (no tool calls needed)
-    // iterations should be empty (didn't loop)
-    expect(trace.payload.iterations).toEqual([]);
     expect(trace.payload.orchestration?.action).toBe("escalate");
+    // Terminal action → goes through to generation/validation
     expect(trace.payload.generation).toBeDefined();
-    expect(trace.payload.final_output).toBeDefined();
+    expect(trace.payload.final_output?.action_required).toBeUndefined();
   });
 
-  it("AbortSignal works in iterative mode", async () => {
-    const controller = new AbortController();
-    controller.abort();
-
-    const pipeline = new Pipeline({
-      mode: "iterative",
-      signal: controller.signal,
-    });
+  it("custom action treated as terminal (same as respond)", async () => {
+    const pipeline = new Pipeline();
     pipeline.register(new DummyTranslationLayer());
     pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyOrchestrationLayer());
-    pipeline.register(new DummyExecutionLayer());
-    pipeline.register(new DummyGenerationLayer());
-    pipeline.register(new DummyValidationLayer());
-
-    await expect(
-      pipeline.run({ raw: "hello", modality: "text" }),
-    ).rejects.toThrow("Pipeline aborted");
-  });
-
-  it("greeting in iterative mode skips tool loop (action=respond)", async () => {
-    const pipeline = buildIterativePipeline();
-    const trace = await pipeline.run({ raw: "hello", modality: "text" });
-
-    // Greeting → orchestration says "respond" → no iterations
-    expect(trace.payload.classification?.intent).toBe("greeting");
-    expect(trace.payload.orchestration?.action).toBe("respond");
-    expect(trace.payload.iterations).toEqual([]);
-  });
-
-  it("tool_params passed through orchestration", async () => {
-    const pipeline = new Pipeline({ mode: "iterative" });
-    pipeline.register(new DummyTranslationLayer());
-    pipeline.register(new DummyClassificationLayer());
-    pipeline.register(new DummyExecutionLayer());
-    pipeline.register(new DummyGenerationLayer());
-    pipeline.register(new DummyValidationLayer());
-
-    let callCount = 0;
     pipeline.register({
       name: "orchestration",
       async process(): Promise<OrchestrationOutput> {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            action: "use_tool",
-            workflow_steps: ["book_appointment"],
-            tool_selections: ["booking_api"],
-            tool_params: { date: "2026-04-15", service: "haircut" },
-            estimated_steps: 1,
-            mode: "llm",
-            model_id: "test",
-            model_ver: "1.0",
-            latency_ms: 0,
-            confidence: 0.9,
-            status: "ok",
-          };
-        }
         return {
-          action: "respond",
-          workflow_steps: [],
+          action: "require_approval",
+          workflow_steps: ["check_policy"],
           tool_selections: [],
-          estimated_steps: 0,
+          estimated_steps: 1,
           mode: "llm",
+          reasoning: "Requires manager approval",
           model_id: "test",
           model_ver: "1.0",
           latency_ms: 0,
@@ -1438,13 +1419,42 @@ describe("Iterative Mode", () => {
         };
       },
     });
+    pipeline.register(new DummyExecutionLayer());
+    pipeline.register(new DummyGenerationLayer());
+    pipeline.register(new DummyValidationLayer());
 
-    const trace = await pipeline.run({ raw: "book haircut", modality: "text" });
-
-    // First iteration should have tool_params
-    expect(trace.payload.iterations![0].orchestration.tool_params).toEqual({
-      date: "2026-04-15",
-      service: "haircut",
+    const trace = await pipeline.run({
+      raw: "cancel my order",
+      modality: "text",
     });
+
+    expect(trace.payload.orchestration?.action).toBe("require_approval");
+    // Custom action is terminal → full pipeline
+    expect(trace.payload.generation).toBeDefined();
+    expect(trace.payload.final_output?.action_required).toBeUndefined();
+  });
+
+  it("tool_results flow through input to orchestration", async () => {
+    const pipeline = buildPipeline();
+
+    const toolResults: ToolResult[] = [
+      {
+        tool: "order_api",
+        status: "ok",
+        result: { order_id: "ORD-1234", status: "confirmed" },
+      },
+    ];
+
+    const trace = await pipeline.run({
+      raw: "order a burger",
+      modality: "text",
+      tool_results: toolResults,
+    });
+
+    // Input should carry tool_results
+    expect(trace.payload.input.tool_results).toHaveLength(1);
+    expect(trace.payload.input.tool_results![0].tool).toBe("order_api");
+    // Orchestration should switch to "respond"
+    expect(trace.payload.orchestration?.action).toBe("respond");
   });
 });

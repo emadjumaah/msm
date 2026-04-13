@@ -13,10 +13,9 @@ import type {
 
 const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
   place_order: (p) => {
-    const order = p.execution?.tool_results.find((r) => r.tool === "order_api");
-    const restaurant = p.execution?.tool_results.find(
-      (r) => r.tool === "restaurant_api",
-    );
+    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const order = toolResults.find((r) => r.tool === "order_api");
+    const restaurant = toolResults.find((r) => r.tool === "restaurant_api");
     const orderId =
       (order?.result as Record<string, unknown>)?.order_id ?? "ORD-0000";
     const name =
@@ -27,9 +26,8 @@ const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
   },
 
   track_order: (p) => {
-    const delivery = p.execution?.tool_results.find(
-      (r) => r.tool === "delivery_api",
-    );
+    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const delivery = toolResults.find((r) => r.tool === "delivery_api");
     const eta =
       (delivery?.result as Record<string, unknown>)?.eta_minutes ?? "unknown";
     const status =
@@ -41,9 +39,8 @@ const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
     "Your order has been cancelled. A full refund will be processed.",
 
   inquiry: (p) => {
-    const kb = p.execution?.tool_results.find(
-      (r) => r.tool === "knowledge_api",
-    );
+    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const kb = toolResults.find((r) => r.tool === "knowledge_api");
     return (
       ((kb?.result as Record<string, unknown>)?.answer as string) ??
       "Here is the information you requested."
@@ -51,9 +48,8 @@ const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
   },
 
   complaint: (p) => {
-    const ticket = p.execution?.tool_results.find(
-      (r) => r.tool === "support_api",
-    );
+    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const ticket = toolResults.find((r) => r.tool === "support_api");
     const ticketId =
       (ticket?.result as Record<string, unknown>)?.ticket_id ?? "TKT-0000";
     return `We're sorry about the issue. A support ticket ${ticketId} has been created and assigned to our team.`;

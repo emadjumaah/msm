@@ -3,6 +3,7 @@ import type {
   MSMPayload,
   OrchestrationOutput,
   OrchestrationAction,
+  PlanStep,
 } from "../core/types.js";
 
 /**
@@ -22,6 +23,8 @@ interface WorkflowRule {
   steps: string[];
   tools: string[];
   action: OrchestrationAction;
+  /** Suggested tool for the first step (when action is use_tool) */
+  tool_name?: string;
 }
 
 const WORKFLOWS: Record<string, WorkflowRule> = {
@@ -35,11 +38,13 @@ const WORKFLOWS: Record<string, WorkflowRule> = {
     ],
     tools: ["location_api", "restaurant_api", "menu_api", "order_api"],
     action: "use_tool",
+    tool_name: "menu_api",
   },
   track_order: {
     steps: ["lookup_order", "get_delivery_status", "estimate_eta"],
     tools: ["order_api", "delivery_api"],
     action: "use_tool",
+    tool_name: "order_api",
   },
   cancel: {
     steps: [
@@ -50,11 +55,13 @@ const WORKFLOWS: Record<string, WorkflowRule> = {
     ],
     tools: ["order_api", "policy_api"],
     action: "use_tool",
+    tool_name: "order_api",
   },
   inquiry: {
     steps: ["identify_subject", "fetch_information", "format_answer"],
     tools: ["knowledge_api"],
     action: "use_tool",
+    tool_name: "knowledge_api",
   },
   complaint: {
     steps: [
@@ -65,6 +72,7 @@ const WORKFLOWS: Record<string, WorkflowRule> = {
     ],
     tools: ["order_api", "support_api"],
     action: "use_tool",
+    tool_name: "support_api",
   },
   greeting: {
     steps: ["generate_greeting"],
@@ -88,22 +96,43 @@ export class DummyOrchestrationLayer implements MSMLayer<OrchestrationOutput> {
     const matched = WORKFLOWS[intent];
     const wf = matched ?? DEFAULT_WORKFLOW;
 
-    // In iterative mode with prior iterations, switch to "respond" after first tool execution
-    const hasIterations = (payload.iterations?.length ?? 0) > 0;
-    const action = hasIterations
+    // If agent fed back tool_results, switch to "respond" — brain is done
+    const hasToolResults = (payload.input.tool_results?.length ?? 0) > 0;
+    const action = hasToolResults
       ? ("respond" as OrchestrationAction)
       : wf.action;
 
+    // Build plan for multi-step tasks
+    const plan: PlanStep[] | undefined =
+      action === "use_tool"
+        ? wf.steps.map((step, i) => ({
+            id: i + 1,
+            description: step,
+            tool_hint: wf.tools[i] ?? null,
+            status: i === 0 ? ("current" as const) : ("pending" as const),
+          }))
+        : undefined;
+
     return {
       action,
+      tool_name: action === "use_tool" ? wf.tool_name : undefined,
+      tool_params:
+        action === "use_tool"
+          ? { intent, query: payload.input.raw }
+          : undefined,
+      plan,
       workflow_steps: wf.steps,
       tool_selections: wf.tools,
       estimated_steps: wf.steps.length,
-      mode: matched ? "rules" : "rules", // dummy always uses rules
+      mode: matched ? "rules" : "rules",
+      reasoning:
+        action === "use_tool"
+          ? `Need to call ${wf.tool_name ?? "tool"} for ${intent}`
+          : `Responding directly for ${intent}`,
       model_id: "dummy-orchestration-v1",
       model_ver: "1.0.0",
       latency_ms: Math.round(performance.now() - start),
-      confidence: matched ? 0.9 : 0.5, // higher confidence when rule matched
+      confidence: matched ? 0.9 : 0.5,
       status: "ok",
     };
   }

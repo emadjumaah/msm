@@ -63,7 +63,7 @@ const ManifestSchema = z
     region: z.string().optional(),
     created: isoDateString,
 
-    /** Pipeline execution configuration */
+    /** @deprecated Pipeline mode config — kept for backward compatibility. MSM is always single-pass. */
     pipeline: z
       .object({
         mode: z.enum(["linear", "iterative"]).default("linear"),

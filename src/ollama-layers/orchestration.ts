@@ -66,11 +66,26 @@ export class OllamaOrchestrationLayer implements MSMLayer<OrchestrationOutput> {
     const steps = parsed.workflow_steps;
     const tools = parsed.tool_selections;
 
+    // If agent fed back tool_results, brain is done — respond
+    const hasToolResults = (payload.input.tool_results?.length ?? 0) > 0;
+    const action = hasToolResults
+      ? "respond"
+      : tools.length > 0
+        ? "use_tool"
+        : "respond";
+
     return {
+      action,
+      tool_name: action === "use_tool" ? tools[0] : undefined,
+      tool_params:
+        action === "use_tool"
+          ? { intent: payload.classification?.intent ?? "unknown" }
+          : undefined,
       workflow_steps: steps,
       tool_selections: tools,
       estimated_steps: steps.length,
       mode: "llm",
+      reasoning: `Planned ${steps.length} steps for ${payload.classification?.intent ?? "unknown"}`,
       model_id: this.model,
       model_ver: "1.0.0",
       latency_ms: latency,

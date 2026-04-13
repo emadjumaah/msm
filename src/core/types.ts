@@ -16,6 +16,14 @@ export interface LayerMeta {
   error?: string;
 }
 
+// ─── Tool Result (shared by Input and Execution) ────────────
+
+export interface ToolResult {
+  tool: string;
+  status: LayerStatus;
+  result: Record<string, unknown>;
+}
+
 // ─── Input ───────────────────────────────────────────────────
 
 export interface MSMInput {
@@ -28,6 +36,12 @@ export interface MSMInput {
   direction?: "inbound" | "outbound";
   /** Target language for outbound translation (e.g. "ar-gulf") */
   target_language?: string;
+  /**
+   * Tool execution results from a previous brain call.
+   * The agent executes tools externally, then feeds results back here
+   * so the brain can decide the next step or generate a final response.
+   */
+  tool_results?: ToolResult[];
 }
 
 // ─── Context Annotation (Option C: Cultural Context) ─────────
@@ -68,16 +82,18 @@ export type OrchestrationMode = "rules" | "llm" | "hybrid";
 /**
  * Standard orchestration actions.
  *
- * MSM defines 5 standard actions that the pipeline understands natively:
- *   - "use_tool"  — call a tool, then re-enter orchestration (iterative mode)
- *   - "respond"   — stop iterating, proceed to generation
- *   - "clarify"   — ask the user for more information, proceed to generation
- *   - "escalate"  — hand off to a human, proceed to generation
- *   - "delegate"  — hand off to another agent/role, proceed to generation
+ * MSM is a single-pass brain. The orchestration layer returns ONE action per call:
+ *   - "use_tool"  — brain requests a tool call. Agent executes it, then calls brain again.
+ *   - "respond"   — brain is ready to respond. Pipeline generates output.
+ *   - "clarify"   — brain needs more info. Pipeline generates a clarifying question.
+ *   - "escalate"  — hand off to a human. Pipeline generates a handoff message.
+ *   - "delegate"  — hand off to another agent/role.
+ *
+ * When action is "use_tool", the pipeline skips generation and validation —
+ * the brain returns the tool request directly. The agent controls the loop.
  *
  * The type is `string` (not a union) — agents can define custom actions
- * beyond the standard set. Only "use_tool" triggers another iteration;
- * any other action is treated as terminal (proceed to generation).
+ * beyond the standard set (e.g. "require_approval", "schedule_callback").
  */
 export type OrchestrationAction = string;
 
@@ -90,13 +106,25 @@ export const STANDARD_ACTIONS = {
   DELEGATE: "delegate" as OrchestrationAction,
 } as const;
 
+/** A step in the orchestration plan for multi-step tasks */
+export interface PlanStep {
+  id: number;
+  description: string;
+  tool_hint: string | null;
+  status: "pending" | "current" | "done" | "failed";
+}
+
 export interface OrchestrationOutput extends LayerMeta {
-  /** Next action — required in iterative mode, optional in linear */
-  action?: OrchestrationAction;
+  /** The brain's decision — what to do next */
+  action: OrchestrationAction;
+  /** Name of the tool to call (when action is "use_tool") */
+  tool_name?: string;
+  /** Parameters for the tool call (when action is "use_tool") */
+  tool_params?: Record<string, unknown>;
+  /** Multi-step plan for complex tasks (optional, returned on first call) */
+  plan?: PlanStep[];
   workflow_steps: string[];
   tool_selections: string[];
-  /** Parameters for the current tool call (iterative mode) */
-  tool_params?: Record<string, unknown>;
   estimated_steps: number;
   /** How the workflow was resolved: rules, llm, or hybrid (rules + llm fallback) */
   mode: OrchestrationMode;
@@ -105,12 +133,6 @@ export interface OrchestrationOutput extends LayerMeta {
 }
 
 // ─── Layer 4: Execution ──────────────────────────────────────
-
-export interface ToolResult {
-  tool: string;
-  status: LayerStatus;
-  result: Record<string, unknown>;
-}
 
 export interface ExecutionOutput extends LayerMeta {
   tool_results: ToolResult[];
@@ -151,15 +173,12 @@ export interface FinalOutput {
   total_latency_ms: number;
   /** Aggregate pipeline health: "ok" if all layers succeeded, "degraded" if any failed but output was produced, "failed" if pipeline could not produce output */
   pipeline_status: "ok" | "degraded" | "failed";
-  /** Number of orchestrate→execute iterations (iterative mode only) */
-  iterations_used?: number;
-}
-
-// ─── Iteration Record (iterative pipelines) ─────────────────
-
-export interface PipelineIteration {
-  orchestration: OrchestrationOutput;
-  execution?: ExecutionOutput;
+  /**
+   * When true, the brain is requesting a tool call (action="use_tool").
+   * Generation and validation were skipped — the agent should execute
+   * the tool and call the brain again with tool_results.
+   */
+  action_required?: boolean;
 }
 
 // ─── Full Payload ────────────────────────────────────────────
@@ -180,9 +199,6 @@ export interface MSMPayload {
   /** Outbound translation: English response → user's language */
   outbound_translation?: TranslationOutput;
   final_output?: FinalOutput;
-
-  /** Past orchestrate→execute iterations (iterative mode) */
-  iterations?: PipelineIteration[];
 
   /** Hook outputs keyed by hook name (domain-specific extensions) */
   hooks?: Record<string, HookOutput>;

@@ -17,7 +17,7 @@ export type {
   GenerationOutput,
   ValidationOutput,
   FinalOutput,
-  PipelineIteration,
+  PlanStep,
   MSMPayload,
   LayerName,
   MSMLayer,

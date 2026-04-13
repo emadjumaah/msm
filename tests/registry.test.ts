@@ -209,8 +209,9 @@ describe("createPipeline", () => {
       "./examples/food-commerce-gulf-dummy.yaml",
     );
 
+    // Arabic greeting → respond → full pipeline + outbound translation
     const trace = await pipeline.run({
-      raw: "ابي اطلب برغر وبيبسي",
+      raw: "مرحبا",
       modality: "text",
     });
 
