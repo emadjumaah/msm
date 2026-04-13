@@ -572,6 +572,55 @@ See [examples/agent-integration.ts](examples/agent-integration.ts) for the full 
 
 ---
 
+## Shared Brain — Multi-Tenant Architecture
+
+MSM is stateless and manifest-driven. This makes it **multi-tenant by default** — no extra infrastructure required.
+
+Each request carries a `manifest_id`. The brain loads the right models, runs the pipeline, returns a decision. It has no concept of tenants, sessions, or routing.
+
+```
+Agent (salon)      → { message, manifest_id: "booking-gulf" }      ──┐
+Agent (hotel)      → { message, manifest_id: "booking-gulf" }      ──┤
+Agent (restaurant) → { message, manifest_id: "food-gulf" }         ──┤──→ Brain Service
+Agent (clinic)     → { message, manifest_id: "healthcare-gulf" }   ──┘    (one instance)
+```
+
+**The agent owns the manifest choice.** It knows its domain at deploy time and sends the manifest ID with every request. No gateway, no tenant lookup table, no routing layer.
+
+### Model deduplication
+
+Models referenced by multiple manifests are loaded **once** in GPU memory:
+
+```
+5 manifests × 5 models each = 25 model loads (naive)
+
+With deduplication:
+  arabic-translate    ← loaded once, used by all 5 manifests
+  intent-classify     ← loaded once, used by all 5 manifests
+  format-validate     ← loaded once, used by all 5 manifests
+  gulf-generate       ← loaded once, used by 4 manifests
+  booking-orchestrate ← loaded once, used by 2 manifests
+  food-orchestrate    ← loaded once
+  health-orchestrate  ← loaded once
+
+  Total: 7 models in GPU memory (not 25)
+```
+
+### Layer shareability across businesses
+
+| Layer          | Shared across verticals? | Notes                                                   |
+| -------------- | ------------------------ | ------------------------------------------------------- |
+| Translation    | Fully shared             | Language processing is domain-agnostic                  |
+| Classification | Mostly shared            | Core intents (book, cancel, inquire) are universal      |
+| Orchestration  | Partially shared         | Same pattern (intent → tool), different tool registries |
+| Execution      | Fully shared             | Passthrough — agent handles real execution              |
+| Generation     | Partially shared         | Vertical-specific tone (hospitality vs medical)         |
+| Validation     | Fully shared             | Format, language, and safety checks are domain-agnostic |
+
+Two businesses in the same vertical (e.g., two restaurants) share 100% of the brain — same manifest, same models. The only difference is the agent's tool configuration.
+
+---
+
 ## HTTP Server API
 
 ```bash
@@ -587,6 +636,7 @@ MSM_PORT=8080 pnpm server                            # custom port
 {
   "text": "ابي اطلب برغر وبيبسي",
   "modality": "text",
+  "manifest_id": "food-commerce-gulf",
   "session_id": "optional-session-id",
   "history": [
     { "role": "user", "content": "What's on your menu?" },
@@ -595,7 +645,7 @@ MSM_PORT=8080 pnpm server                            # custom port
 }
 ```
 
-All fields except `text` are optional. Request body is validated with Zod (max 4096 chars per field, max 50 history entries, 64KB body limit).
+All fields except `text` are optional. When `manifest_id` is provided, the brain loads and caches the corresponding manifest — enabling multi-tenant deployments from a single brain service. Request body is validated with Zod (max 4096 chars per field, max 50 history entries, 64KB body limit).
 
 Response:
 
@@ -665,14 +715,62 @@ Returns server status and registered layers.
 
 ## The Six Layers
 
-| #   | Layer              | Job                                | Dummy Model            | Ollama Model | Production Model         |
-| --- | ------------------ | ---------------------------------- | ---------------------- | ------------ | ------------------------ |
-| 1   | **Translation**    | Convert any language ↔ English     | Word-list substitution | qwen2.5:3b   | NLLB-200 600M            |
-| 2   | **Classification** | Identify intent, domain, urgency   | Keyword matching       | qwen2.5:3b   | mDeBERTa-v3 + CAMeL-BERT |
-| 3   | **Orchestration**  | Plan workflow steps + select tools | Hardcoded workflows    | qwen2.5:3b   | Qwen 2.5 3B              |
-| 4   | **Execution**      | Execute tool calls, handle errors  | Mock API responses     | Mock APIs    | Your real APIs           |
-| 5   | **Generation**     | Compose natural response           | Template responses     | qwen2.5:3b   | Qwen 2.5 0.5B            |
-| 6   | **Validation**     | Verify quality, policy, safety     | Blocked-word check     | Rule-based   | MiniCheck + DeBERTa-v3   |
+| #   | Layer              | Job                                           | Dummy Model            | Ollama Model | Production Model                                   |
+| --- | ------------------ | --------------------------------------------- | ---------------------- | ------------ | -------------------------------------------------- |
+| 1   | **Translation**    | Convert any language ↔ English                | Word-list substitution | qwen2.5:3b   | NLLB-200-distilled-600M (600M)                     |
+| 2   | **Classification** | Identify intent, domain, urgency              | Keyword matching       | qwen2.5:3b   | MiniLM-L6-v2 + head (22.7M) or CAMeLBERT-DA (110M) |
+| 3   | **Orchestration**  | Extract params, plan steps, select tools      | Hardcoded workflows    | qwen2.5:3b   | Qwen2.5-1.5B-Instruct (1.54B)                      |
+| 4   | **Execution**      | Passthrough — agent handles real execution    | Mock API responses     | Mock APIs    | (none — passthrough)                               |
+| 5   | **Generation**     | Compose grounded response from KB + tool data | Template responses     | qwen2.5:3b   | ← same Qwen2.5-1.5B (shared)                       |
+| 6   | **Validation**     | Verify quality, grounding, safety             | Blocked-word check     | Rule-based   | Rule-based + fastText langdetect                   |
+
+> Orchestration and Generation share the same Qwen2.5-1.5B model — loaded once, used with different system prompts. Execution is a passthrough; the agent handles real tool calls. This means a production pipeline typically loads **3 models total**.
+
+---
+
+## Model Sizing
+
+A production MSM brain runs on 3 models. Orchestration and Generation share one model (different system prompts, same weights). Execution and Validation are rule-based.
+
+### What each layer actually does
+
+| Layer          | Task type                  | Why it needs ML (or doesn't)                                                                  |
+| -------------- | -------------------------- | --------------------------------------------------------------------------------------------- |
+| Translation    | Sequence-to-sequence       | Dialect handling, cultural context annotations, time conventions                              |
+| Classification | Multi-label classification | Sentence-level intent + domain from ~12-20 labels                                             |
+| Orchestration  | Structured JSON generation | Parameter extraction, missing field detection, KB-sufficiency check, multi-step planning      |
+| Execution      | Passthrough                | Agent handles it — no model                                                                   |
+| Generation     | Grounded text generation   | Synthesize KB snippets + tool results + company profile into fluent response with brand voice |
+| Validation     | Rule-based checks          | Language, safety, completeness, factual grounding against KB                                  |
+
+### Reference configurations
+
+**Gulf Arabic (booking, food, support):**
+
+| Layer          | Model                    | Params | Disk (quantized) |
+| -------------- | ------------------------ | ------ | ---------------- |
+| Translation    | NLLB-200-distilled-600M  | 600M   | ~1.2GB           |
+| Classification | MiniLM-L6-v2 + head      | 22.7M  | ~90MB            |
+| Orchestration  | Qwen2.5-1.5B-Instruct Q4 | 1.54B  | ~1GB             |
+| Execution      | —                        | —      | —                |
+| Generation     | ← same model (shared)    | —      | —                |
+| Validation     | Rule-based               | —      | —                |
+| **Total**      | **3 models**             |        | **~2.3GB**       |
+
+**English-only (no translation):**
+
+| Layer          | Model                    | Params | Disk (quantized) |
+| -------------- | ------------------------ | ------ | ---------------- |
+| Classification | MiniLM-L6-v2 + head      | 22.7M  | ~90MB            |
+| Orchestration  | Qwen2.5-1.5B-Instruct Q4 | 1.54B  | ~1GB             |
+| Generation     | ← same model (shared)    | —      | —                |
+| **Total**      | **2 models**             |        | **~1.1GB**       |
+
+> All model sizes verified against HuggingFace model cards (April 2026). Qwen2.5-1.5B: 1.54B params confirmed, supports 29+ languages including Arabic, structured JSON output. MiniLM-L6-v2: 22.7M params, 384-dim embeddings. NLLB-200: 600M params, 200 language variants.
+
+### Context and grounding
+
+The brain receives pre-fetched context from the agent — KB snippets, company profile, conversation history. It never queries databases directly. Generation (L5) synthesizes responses from this provided context. Validation (L6) checks that the generated response only contains facts present in the KB and tool results.
 
 ---
 
@@ -861,15 +959,42 @@ Results are saved to `benchmark-results.json` for programmatic use.
 
 ## Philosophy
 
+### The brain is simple — on purpose
+
+Classifying "I want a burger" as `intent: place_order` is not intelligence. It's pattern matching. Translating Gulf Arabic is not reasoning. It's linguistics. Picking which API to call is not thinking. It's a lookup table with context.
+
+LLMs use 70 billion parameters to do what a 3B model does just as well — when the domain is bounded. MSM exists because **most commercial AI tasks are bounded**. You know the intents. You know the tools. You know the languages. You don't need general intelligence. You need specialized accuracy.
+
+### The brain decides. The agent executes.
+
+MSM is a **stateless brain**: `f(message, manifest_id) → decision`. It never calls APIs, never manages state, never remembers previous turns. That's the agent's job.
+
+This separation means:
+
+- **The brain scales horizontally** — 100 agents can share one brain service on a single GPU
+- **The brain runs anywhere** — cloud, on-premise, edge device, browser (via WASM)
+- **The brain is testable** — input in, decision out, no side effects
+- **The brain is multi-tenant by default** — each request carries a manifest ID, no routing infrastructure
+- **The agent is portable** — swap the brain (new manifest), keep the same agent loop
+
+### Models are commodities. The pipeline is the product.
+
+When a better Arabic translation model comes out, you change one line in a YAML file. When you switch from Ollama to a cloud provider, you register a new provider. When you move from food commerce to healthcare, you swap the manifest.
+
+The models are replaceable. The 6-layer pipeline contract — translate, classify, orchestrate, execute, generate, validate — is the standard. That's what MSM is.
+
 ```
-LLM:  one model knows everything
-MSM:  each model masters one thing
+LLM approach:   one model knows everything → expensive, slow, black box
+MSM approach:   each model masters one task → cheap, fast, auditable
 
-LLM:  scale solves all problems
-MSM:  specialization solves real problems
+LLM approach:   brain and hands are the same thing
+MSM approach:   brain decides, hands execute — separately, swappably
 
-LLM:  black box, hope it works
-MSM:  modular, measurable, replaceable
+LLM approach:   scale the model to solve more problems
+MSM approach:   specialize the model to solve real problems
+
+LLM approach:   needs internet, needs API key, needs budget
+MSM approach:   runs on a phone, runs offline, runs on your GPU
 ```
 
 ## Contributing
