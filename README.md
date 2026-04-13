@@ -23,13 +23,11 @@ User Message                          Agent Loop
      │                                     │  → Agent delivers response
      └─ "respond" / "escalate" / custom    │
           ↓                                │  action = "escalate"?
-     [L4] Execution                        │  → Agent routes to human
+     [L4] Generation                       │  → Agent routes to human
           ↓                                │
-     [L5] Generation                       │  action = custom?
+     [L5] Validation                       │  action = custom?
           ↓                                │  → Agent handles internally
-     [L6] Validation                       │
-          ↓                                │
-     [L7] Outbound Translation             │
+     [L6] Outbound Translation             │
           ↓                                │
      Final Output                          │
 ```
@@ -58,7 +56,7 @@ import {
 } from "msm-ai";
 
 const brain = new Pipeline();
-// ... register 6 layers ...
+// ... register 5 layers ...
 brain.freeze();
 
 // Agent loop
@@ -113,7 +111,7 @@ Only `"use_tool"` has special pipeline behavior (triggers early return with `act
 
 ## Why MSM — and not LangChain / LlamaIndex?
 
-LangChain and LlamaIndex are **orchestration libraries** — they help you call one large model in flexible ways. MSM is a **pipeline standard** — it replaces the one large model with six small specialized ones.
+LangChain and LlamaIndex are **orchestration libraries** — they help you call one large model in flexible ways. MSM is a **pipeline standard** — it replaces the one large model with five small specialized ones.
 
 |                  | LangChain / LlamaIndex | MSM                                        |
 | ---------------- | ---------------------- | ------------------------------------------ |
@@ -253,9 +251,6 @@ layers:
   orchestration:
     provider: ollama
     model: "qwen2.5:3b"
-
-  execution:
-    provider: dummy # ← rule-based, no LLM needed
 
   generation:
     provider: ollama
@@ -416,7 +411,7 @@ class NLLBTranslationLayer extends HttpLayer<TranslationOutput> {
 
 | Provider | Layers                                                 | Requirements     | Use Case         |
 | -------- | ------------------------------------------------------ | ---------------- | ---------------- |
-| `dummy`  | All 6                                                  | None             | Testing, offline |
+| `dummy`  | All 5                                                  | None             | Testing, offline |
 | `ollama` | Translation, Classification, Orchestration, Generation | Ollama installed | Local AI, dev    |
 | `http`   | (base class)                                           | Model server     | Production       |
 
@@ -424,7 +419,7 @@ class NLLBTranslationLayer extends HttpLayer<TranslationOutput> {
 
 ## Hooks — Domain Extensions Without Core Changes
 
-The 6 core layers are the standard. They don't change. But different domains need specialized processing — image recognition, drug checks, fraud detection. That's what **hooks** are for.
+The 5 core layers are the standard. They don't change. But different domains need specialized processing — image recognition, drug checks, fraud detection. That's what **hooks** are for.
 
 Hooks plug in **between** layers. They enrich the payload without touching the pipeline architecture:
 
@@ -440,13 +435,11 @@ Hooks plug in **between** layers. They enrich the payload without touching the p
            │       ↓                     │
            │  [L3] Orchestration         │
            │       ↓                     │
-           │  [L4] Execution             │
-           │       ↓                     │
-           │  [L5] Generation            │
+           │  [L4] Generation            │
            │       ↓                     │
            │  ⚡ drug_interaction hook    │  ← checks for dangerous combos
            │       ↓                     │
-           │  [L6] Validation            │
+           │  [L5] Validation            │
            └─────────────────────────────┘
 ```
 
@@ -457,7 +450,7 @@ Hooks plug in **between** layers. They enrich the payload without touching the p
 layers:
   translation: { provider: ollama, model: "qwen2.5:3b", ... }
   classification: { provider: http, model: "mdeberta-v3-medical", ... }
-  # ... 6 standard layers ...
+  # ... 5 standard layers ...
 
 hooks:
   image_analysis:
@@ -480,7 +473,7 @@ import { Pipeline } from "msm-ai";
 import type { MSMHook } from "msm-ai";
 
 const pipeline = new Pipeline();
-// ... register 6 core layers ...
+// ... register 5 core layers ...
 
 // Add a custom hook — no core changes needed
 pipeline.addHook({
@@ -517,7 +510,7 @@ pipeline.addHook({
 | Healthcare | `drug_interaction` | `after:generation`      | Check response for dangerous drug combos |
 | E-commerce | `fraud_detection`  | `after:classification`  | Flag suspicious purchase patterns        |
 | Legal      | `compliance_check` | `after:generation`      | Verify response meets regulations        |
-| Finance    | `kyc_verification` | `before:execution`      | Verify identity before processing        |
+| Finance    | `kyc_verification` | `before:generation`     | Verify identity before processing        |
 
 ---
 
@@ -529,7 +522,7 @@ MSM is the **brain**. Your agent is the **hands**. The brain decides; the agent 
 import { Pipeline, STANDARD_ACTIONS, type MSMInput } from "msm-ai";
 
 const brain = new Pipeline();
-// ... register 6 layers ...
+// ... register 5 layers ...
 brain.freeze();
 
 async function handleMessage(userMessage: string) {
@@ -613,7 +606,6 @@ With deduplication:
 | Translation    | Fully shared             | Language processing is domain-agnostic                  |
 | Classification | Mostly shared            | Core intents (book, cancel, inquire) are universal      |
 | Orchestration  | Partially shared         | Same pattern (intent → tool), different tool registries |
-| Execution      | Fully shared             | Passthrough — agent handles real execution              |
 | Generation     | Partially shared         | Vertical-specific tone (hospitality vs medical)         |
 | Validation     | Fully shared             | Format, language, and safety checks are domain-agnostic |
 
@@ -678,12 +670,6 @@ Response:
       "status": "ok"
     },
     {
-      "layer": "execution",
-      "model_id": "dummy-execution-v1",
-      "latency_ms": 0,
-      "status": "ok"
-    },
-    {
       "layer": "generation",
       "model_id": "dummy-generation-v1",
       "latency_ms": 0,
@@ -713,24 +699,23 @@ Returns server status and registered layers.
 
 ---
 
-## The Six Layers
+## The Five Layers
 
 | #   | Layer              | Job                                           | Dummy Model            | Ollama Model | Production Model                                   |
 | --- | ------------------ | --------------------------------------------- | ---------------------- | ------------ | -------------------------------------------------- |
 | 1   | **Translation**    | Convert any language ↔ English                | Word-list substitution | qwen2.5:3b   | NLLB-200-distilled-600M (600M)                     |
 | 2   | **Classification** | Identify intent, domain, urgency              | Keyword matching       | qwen2.5:3b   | MiniLM-L6-v2 + head (22.7M) or CAMeLBERT-DA (110M) |
 | 3   | **Orchestration**  | Extract params, plan steps, select tools      | Hardcoded workflows    | qwen2.5:3b   | Qwen2.5-1.5B-Instruct (1.54B)                      |
-| 4   | **Execution**      | Passthrough — agent handles real execution    | Mock API responses     | Mock APIs    | (none — passthrough)                               |
-| 5   | **Generation**     | Compose grounded response from KB + tool data | Template responses     | qwen2.5:3b   | ← same Qwen2.5-1.5B (shared)                       |
-| 6   | **Validation**     | Verify quality, grounding, safety             | Blocked-word check     | Rule-based   | Rule-based + fastText langdetect                   |
+| 4   | **Generation**     | Compose grounded response from KB + tool data | Template responses     | qwen2.5:3b   | ← same Qwen2.5-1.5B (shared)                       |
+| 5   | **Validation**     | Verify quality, grounding, safety             | Blocked-word check     | Rule-based   | Rule-based + fastText langdetect                   |
 
-> Orchestration and Generation share the same Qwen2.5-1.5B model — loaded once, used with different system prompts. Execution is a passthrough; the agent handles real tool calls. This means a production pipeline typically loads **3 models total**.
+> Orchestration and Generation share the same Qwen2.5-1.5B model — loaded once, used with different system prompts. This means a production pipeline typically loads **3 models total**.
 
 ---
 
 ## Model Sizing
 
-A production MSM brain runs on 3 models. Orchestration and Generation share one model (different system prompts, same weights). Execution and Validation are rule-based.
+A production MSM brain runs on 3 models. Orchestration and Generation share one model (different system prompts, same weights). Validation is rule-based.
 
 ### What each layer actually does
 
@@ -739,7 +724,6 @@ A production MSM brain runs on 3 models. Orchestration and Generation share one 
 | Translation    | Sequence-to-sequence       | Dialect handling, cultural context annotations, time conventions                              |
 | Classification | Multi-label classification | Sentence-level intent + domain from ~12-20 labels                                             |
 | Orchestration  | Structured JSON generation | Parameter extraction, missing field detection, KB-sufficiency check, multi-step planning      |
-| Execution      | Passthrough                | Agent handles it — no model                                                                   |
 | Generation     | Grounded text generation   | Synthesize KB snippets + tool results + company profile into fluent response with brand voice |
 | Validation     | Rule-based checks          | Language, safety, completeness, factual grounding against KB                                  |
 
@@ -752,7 +736,6 @@ A production MSM brain runs on 3 models. Orchestration and Generation share one 
 | Translation    | NLLB-200-distilled-600M  | 600M   | ~1.2GB           |
 | Classification | MiniLM-L6-v2 + head      | 22.7M  | ~90MB            |
 | Orchestration  | Qwen2.5-1.5B-Instruct Q4 | 1.54B  | ~1GB             |
-| Execution      | —                        | —      | —                |
 | Generation     | ← same model (shared)    | —      | —                |
 | Validation     | Rule-based               | —      | —                |
 | **Total**      | **3 models**             |        | **~2.3GB**       |
@@ -816,7 +799,6 @@ msm/
 │   │   ├── translation.ts
 │   │   ├── classification.ts
 │   │   ├── orchestration.ts
-│   │   ├── execution.ts
 │   │   ├── generation.ts
 │   │   └── validation.ts
 │   ├── ollama-layers/        ← Provider: "ollama" (real LLM)
@@ -831,10 +813,10 @@ msm/
 │   ├── cli.ts                ← CLI: msm demo / validate / trace
 │   └── index.ts              ← Public API (all exports)
 ├── tests/
-│   ├── pipeline.test.ts      ← 62 pipeline tests (single-pass + agent loop)
+│   ├── pipeline.test.ts      ← 61 pipeline tests (single-pass + agent loop)
 │   ├── manifest.test.ts      ← 13 manifest tests
 │   ├── registry.test.ts      ← 13 registry tests
-│   └── hooks.test.ts         ← 9 hook tests (97 total)
+│   └── hooks.test.ts         ← 9 hook tests (96 total)
 ├── examples/                 ← Domain manifests + integration demos
 │   ├── food-commerce-gulf-dummy.yaml
 │   ├── food-commerce-gulf-ollama.yaml
@@ -879,7 +861,6 @@ pnpm benchmark:ollama        # dummy + Ollama side-by-side
 | Translation    | 0ms | 0ms | 0ms | 100%    |
 | Classification | 0ms | 0ms | 0ms | 100%    |
 | Orchestration  | 0ms | 0ms | 0ms | 100%    |
-| Execution      | 0ms | 0ms | 0ms | 100%    |
 | Generation     | 0ms | 0ms | 0ms | 100%    |
 | Validation     | 0ms | 0ms | 0ms | 100%    |
 
@@ -912,7 +893,7 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - **Hardened server** — Zod request validation, 64KB body limit, 10s read timeout (slowloris protection)
 - **Registry guards** — duplicate registration throws, factory output verified against requested layer name
 - **Bilingual output** — `response_text_ar` / `text_ar` for Arabic responses alongside English
-- **Extensible** — add domain-specific hooks without changing the 6 core layers
+- **Extensible** — add domain-specific hooks without changing the 5 core layers
 
 ---
 
@@ -934,7 +915,7 @@ Results are saved to `benchmark-results.json` for programmatic use.
 - [x] Session history (multi-turn conversation context)
 - [x] Hooks system (domain extensions without core changes)
 - [x] CLI (demo / validate / trace)
-- [x] 97 tests passing
+- [x] 96 tests passing
 - [x] Benchmark suite (latency, accuracy per layer)
 - [x] 8 domain manifests (food, healthcare, sports, legal, banking, education, e-commerce)
 - [x] Single-pass brain (agent loop pattern — brain decides, agent executes)
@@ -981,7 +962,7 @@ This separation means:
 
 When a better Arabic translation model comes out, you change one line in a YAML file. When you switch from Ollama to a cloud provider, you register a new provider. When you move from food commerce to healthcare, you swap the manifest.
 
-The models are replaceable. The 6-layer pipeline contract — translate, classify, orchestrate, execute, generate, validate — is the standard. That's what MSM is.
+The models are replaceable. The 5-layer pipeline contract — translate, classify, orchestrate, generate, validate — is the standard. That's what MSM is.
 
 ```
 LLM approach:   one model knows everything → expensive, slow, black box

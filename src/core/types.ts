@@ -132,15 +132,7 @@ export interface OrchestrationOutput extends LayerMeta {
   reasoning?: string;
 }
 
-// ─── Layer 4: Execution ──────────────────────────────────────
-
-export interface ExecutionOutput extends LayerMeta {
-  tool_results: ToolResult[];
-  execution_status: LayerStatus;
-  errors: string[];
-}
-
-// ─── Layer 5: Generation ─────────────────────────────────────
+// ─── Layer 4: Generation ─────────────────────────────────────
 
 export type Tone = "warm" | "neutral" | "formal" | "apologetic";
 
@@ -152,7 +144,7 @@ export interface GenerationOutput extends LayerMeta {
   word_count: number;
 }
 
-// ─── Layer 6: Validation ─────────────────────────────────────
+// ─── Layer 5: Validation ─────────────────────────────────────
 
 export type ValidationAction = "release" | "block" | "retry";
 
@@ -193,7 +185,6 @@ export interface MSMPayload {
   translation?: TranslationOutput;
   classification?: ClassificationOutput;
   orchestration?: OrchestrationOutput;
-  execution?: ExecutionOutput;
   generation?: GenerationOutput;
   validation?: ValidationOutput;
   /** Outbound translation: English response → user's language */
@@ -217,7 +208,6 @@ export type LayerName =
   | "translation"
   | "classification"
   | "orchestration"
-  | "execution"
   | "generation"
   | "validation";
 
@@ -237,7 +227,7 @@ export interface MSMLayer<T extends LayerMeta = LayerMeta> {
  *   "after:generation"      → drug interaction check, compliance
  *
  * Hooks do NOT replace layers. They enrich the payload.
- * The 6 core layers remain the standard.
+ * The 5 core layers remain the standard.
  */
 export type HookPoint = `before:${LayerName}` | `after:${LayerName}`;
 

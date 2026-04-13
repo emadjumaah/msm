@@ -12,7 +12,6 @@ import {
   DummyTranslationLayer,
   DummyClassificationLayer,
   DummyOrchestrationLayer,
-  DummyExecutionLayer,
   DummyGenerationLayer,
   DummyValidationLayer,
 } from "./dummy-models/index.js";
@@ -82,7 +81,6 @@ async function main() {
   pipeline.register(new DummyTranslationLayer());
   pipeline.register(new DummyClassificationLayer());
   pipeline.register(new DummyOrchestrationLayer());
-  pipeline.register(new DummyExecutionLayer());
   pipeline.register(new DummyGenerationLayer());
   pipeline.register(new DummyValidationLayer());
 
@@ -137,13 +135,6 @@ async function main() {
     );
 
     layerLine(
-      "Execution",
-      `tools=[${p.execution?.tool_results.map((t) => `${t.tool}✓`).join(", ")}]`,
-      p.execution?.confidence ?? 0,
-      p.execution?.latency_ms ?? 0,
-    );
-
-    layerLine(
       "Generation",
       `→ "${p.generation?.response_text}"`,
       p.generation?.confidence ?? 0,
@@ -176,7 +167,7 @@ async function main() {
 
   header("Pipeline Summary");
   console.log(`  ${c.bold}MSM Version:${c.reset}  ${manifest.msm_version}`);
-  console.log(`  ${c.bold}Layers:${c.reset}       6 (all dummy)`);
+  console.log(`  ${c.bold}Layers:${c.reset}       5 (all dummy)`);
   console.log(`  ${c.bold}Test Cases:${c.reset}   ${testCases.length} passed`);
   console.log(
     `  ${c.bold}Status:${c.reset}       ${c.green}Pipeline operational${c.reset}`,

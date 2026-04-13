@@ -27,12 +27,6 @@ layers:
     fine_tuned: false
     endpoint: "http://localhost:11434/api/generate"
 
-  execution:
-    provider: dummy
-    model: "dummy-execution-v1"
-    version: "1.0.0"
-    fine_tuned: false
-
   generation:
     provider: ollama
     model: "qwen2.5:3b"

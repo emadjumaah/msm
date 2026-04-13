@@ -33,13 +33,6 @@ layers:
     dataset: "clinical-triage-workflows-v1"
     endpoint: "http://localhost:8003/orchestrate"
 
-  execution:
-    provider: http
-    model: "functionary-small-v3"
-    version: "1.1"
-    fine_tuned: false
-    endpoint: "http://localhost:8004/execute"
-
   generation:
     provider: http
     model: "qwen2.5-0.5b-medical"

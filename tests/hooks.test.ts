@@ -37,7 +37,6 @@ describe("Pipeline hooks", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ];
@@ -92,7 +91,6 @@ describe("Pipeline hooks", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ];
@@ -144,7 +142,6 @@ describe("Pipeline hooks", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ]) {
@@ -180,7 +177,6 @@ describe("Pipeline hooks", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ]) {
@@ -216,7 +212,6 @@ describe("Pipeline hooks", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ]) {
@@ -239,11 +234,11 @@ describe("Pipeline hooks", () => {
     expect(hookEntry!.status).toBe("failed");
     expect(hookEntry!.error).toBe("Connection refused");
 
-    // All 6 core layers should still run
+    // All 5 core layers should still run
     const coreLayers = trace.entries.filter(
       (e) => !e.layer.startsWith("hook:"),
     );
-    expect(coreLayers).toHaveLength(6);
+    expect(coreLayers).toHaveLength(5);
     expect(coreLayers.every((e) => e.status === "ok")).toBe(true);
   });
 
@@ -253,7 +248,6 @@ describe("Pipeline hooks", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ]) {
@@ -302,7 +296,6 @@ describe("Pipeline hooks", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ]) {
@@ -371,7 +364,6 @@ describe("Registry hook factories", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ]) {
@@ -413,12 +405,6 @@ describe("Registry hook factories", () => {
           fine_tuned: false,
         },
         orchestration: {
-          provider: "dummy",
-          model: "m",
-          version: "1.0",
-          fine_tuned: false,
-        },
-        execution: {
           provider: "dummy",
           model: "m",
           version: "1.0",

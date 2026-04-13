@@ -617,7 +617,6 @@ async function runBenchmark(
     "translation",
     "classification",
     "orchestration",
-    "execution",
     "generation",
     "validation",
   ];

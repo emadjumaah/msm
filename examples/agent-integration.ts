@@ -22,7 +22,6 @@ import {
   DummyTranslationLayer,
   DummyClassificationLayer,
   DummyOrchestrationLayer,
-  DummyExecutionLayer,
   DummyGenerationLayer,
   DummyValidationLayer,
   STANDARD_ACTIONS,
@@ -38,7 +37,6 @@ function buildBrain(): Pipeline {
   pipeline.register(new DummyTranslationLayer());
   pipeline.register(new DummyClassificationLayer());
   pipeline.register(new DummyOrchestrationLayer());
-  pipeline.register(new DummyExecutionLayer());
   pipeline.register(new DummyGenerationLayer());
   pipeline.register(new DummyValidationLayer());
   pipeline.freeze(); // safe for concurrent requests
@@ -75,7 +73,9 @@ async function agentLoop(brain: Pipeline, userMessage: string): Promise<void> {
       console.log(`  Brain [${iteration}]: use_tool → ${toolName}`);
       console.log(`    Params: ${JSON.stringify(toolParams)}`);
       if (plan) {
-        console.log(`    Plan: ${plan.map((s) => `[${s.status}] ${s.description}`).join(" → ")}`);
+        console.log(
+          `    Plan: ${plan.map((s) => `[${s.status}] ${s.description}`).join(" → ")}`,
+        );
       }
 
       // Agent executes the tool (simulated)
@@ -97,7 +97,9 @@ async function agentLoop(brain: Pipeline, userMessage: string): Promise<void> {
     const actionRequired = trace.payload.final_output?.action_required;
 
     console.log(`  Brain [${iteration}]: ${action}`);
-    console.log(`    Response: "${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"`);
+    console.log(
+      `    Response: "${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"`,
+    );
     console.log(`    Language: ${language}`);
 
     if (action === STANDARD_ACTIONS.ESCALATE) {
@@ -175,17 +177,29 @@ async function main() {
   // ── Show standard vs custom actions ──
   console.log("\n────────────────────────────────────────────────────");
   console.log("Standard actions (STANDARD_ACTIONS):");
-  console.log(`  USE_TOOL  = "${STANDARD_ACTIONS.USE_TOOL}"  → brain wants a tool`);
-  console.log(`  RESPOND   = "${STANDARD_ACTIONS.RESPOND}"   → brain has a response`);
-  console.log(`  CLARIFY   = "${STANDARD_ACTIONS.CLARIFY}"   → brain needs more info`);
+  console.log(
+    `  USE_TOOL  = "${STANDARD_ACTIONS.USE_TOOL}"  → brain wants a tool`,
+  );
+  console.log(
+    `  RESPOND   = "${STANDARD_ACTIONS.RESPOND}"   → brain has a response`,
+  );
+  console.log(
+    `  CLARIFY   = "${STANDARD_ACTIONS.CLARIFY}"   → brain needs more info`,
+  );
   console.log(`  ESCALATE  = "${STANDARD_ACTIONS.ESCALATE}"  → hand to human`);
-  console.log(`  DELEGATE  = "${STANDARD_ACTIONS.DELEGATE}"  → pass to another agent`);
+  console.log(
+    `  DELEGATE  = "${STANDARD_ACTIONS.DELEGATE}"  → pass to another agent`,
+  );
   console.log();
   console.log("Custom actions → any string your agent needs:");
-  console.log('  "require_approval", "wait_for_payment", "schedule_callback", ...');
+  console.log(
+    '  "require_approval", "wait_for_payment", "schedule_callback", ...',
+  );
   console.log();
   console.log("Only use_tool triggers early return (action_required=true).");
-  console.log("Every other action → brain generates a response for the agent to deliver.");
+  console.log(
+    "Every other action → brain generates a response for the agent to deliver.",
+  );
   console.log();
 }
 

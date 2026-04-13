@@ -41,20 +41,6 @@ layers:
     dataset: "tutoring-workflows-v1"
     endpoint: "http://localhost:8003/orchestrate"
 
-  execution:
-    provider: http
-    model: "functionary-small-v3"
-    version: "1.1"
-    fine_tuned: false
-    endpoint: "http://localhost:8004/execute"
-    tools:
-      - curriculum_api
-      - quiz_generator
-      - progress_tracker
-      - resource_library
-      - math_solver
-      - diagram_renderer
-
   generation:
     provider: http
     model: "qwen2.5-0.5b-education"

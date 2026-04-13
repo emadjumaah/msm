@@ -9,7 +9,6 @@ import type {
   TranslationOutput,
   ClassificationOutput,
   OrchestrationOutput,
-  ExecutionOutput,
   GenerationOutput,
   ValidationOutput,
   FinalOutput,
@@ -69,7 +68,6 @@ function getLayerFallback(
   name: "orchestration",
   error: string,
 ): OrchestrationOutput;
-function getLayerFallback(name: "execution", error: string): ExecutionOutput;
 function getLayerFallback(name: "generation", error: string): GenerationOutput;
 function getLayerFallback(name: "validation", error: string): ValidationOutput;
 function getLayerFallback(name: LayerName, error: string): LayerMeta;
@@ -80,7 +78,6 @@ function getLayerFallback(
   | TranslationOutput
   | ClassificationOutput
   | OrchestrationOutput
-  | ExecutionOutput
   | GenerationOutput
   | ValidationOutput {
   const base: LayerMeta = {
@@ -119,13 +116,6 @@ function getLayerFallback(
         estimated_steps: 1,
         mode: "rules",
       } satisfies OrchestrationOutput;
-    case "execution":
-      return {
-        ...base,
-        tool_results: [],
-        execution_status: "failed",
-        errors: [error],
-      } satisfies ExecutionOutput;
     case "generation":
       return {
         ...base,
@@ -160,9 +150,6 @@ function setLayerResult(
       break;
     case "orchestration":
       payload.orchestration = result as OrchestrationOutput;
-      break;
-    case "execution":
-      payload.execution = result as ExecutionOutput;
       break;
     case "generation":
       payload.generation = result as GenerationOutput;
@@ -345,14 +332,14 @@ export class Pipeline {
 
   /** Run the full pipeline — single pass, always.
    *
-   * Flow: translate → classify → orchestrate → [execute → generate → validate] or [return tool request]
+   * Flow: translate → classify → orchestrate → [generate → validate] or [return tool request]
    *
-   * When orchestration returns action="use_tool", the pipeline skips execution,
-   * generation, and validation — it returns the tool request immediately.
+   * When orchestration returns action="use_tool", the pipeline skips
+   * generation and validation — it returns the tool request immediately.
    * The agent executes the tool externally, then calls run() again with tool_results.
    *
    * When orchestration returns any other action (respond, clarify, escalate, etc.),
-   * the pipeline proceeds through execution → generation → validation as normal.
+   * the pipeline proceeds through generation → validation as normal.
    */
   async run(input: MSMInput, sessionId?: string): Promise<PipelineTrace> {
     const traceId = randomUUID();
@@ -422,10 +409,7 @@ export class Pipeline {
     }
 
     // ── Terminal action — generate response ──────────────────
-    // execute → generate → validate → outbound translate
-
-    checkAbort();
-    await this.runLayer("execution", payload, entries, layers, hooks, 0);
+    // generate → validate → outbound translate
 
     checkAbort();
     const genResult = await this.runLayer(

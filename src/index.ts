@@ -12,7 +12,6 @@ export type {
   OrchestrationMode,
   OrchestrationAction,
   OrchestrationOutput,
-  ExecutionOutput,
   Tone,
   GenerationOutput,
   ValidationOutput,
@@ -54,7 +53,6 @@ export {
   DummyTranslationLayer,
   DummyClassificationLayer,
   DummyOrchestrationLayer,
-  DummyExecutionLayer,
   DummyGenerationLayer,
   DummyValidationLayer,
 } from "./dummy-models/index.js";

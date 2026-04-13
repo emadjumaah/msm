@@ -50,8 +50,11 @@ export class OllamaGenerationLayer implements MSMLayer<GenerationOutput> {
     const text = payload.translation?.translated_text ?? payload.input.raw;
     const steps = payload.orchestration?.workflow_steps?.join(", ") ?? "none";
     const toolResults =
-      payload.execution?.tool_results
-        ?.map((t) => `${t.tool}: ${JSON.stringify(t.result)}`)
+      payload.input.tool_results
+        ?.map(
+          (t: { tool: string; result: unknown }) =>
+            `${t.tool}: ${JSON.stringify(t.result)}`,
+        )
         .join("\n") ?? "none";
 
     const prompt = `User message: "${text}"

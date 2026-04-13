@@ -17,7 +17,6 @@ import {
   OllamaClassificationLayer,
   OllamaOrchestrationLayer,
   OllamaGenerationLayer,
-  DummyExecutionLayer,
   DummyValidationLayer,
 } from "./ollama-layers/index.js";
 
@@ -82,12 +81,11 @@ async function main() {
   pipeline.register(new OllamaTranslationLayer());
   pipeline.register(new OllamaClassificationLayer());
   pipeline.register(new OllamaOrchestrationLayer());
-  pipeline.register(new DummyExecutionLayer()); // Rule-based: calls mock APIs
   pipeline.register(new OllamaGenerationLayer());
   pipeline.register(new DummyValidationLayer()); // Rule-based: policy checks
 
   console.log(`\n  ${c.dim}Model:  qwen2.5:3b (1.9GB)${c.reset}`);
-  console.log(`  ${c.dim}Layers: 4 real (Ollama) + 2 rule-based${c.reset}`);
+  console.log(`  ${c.dim}Layers: 3 real (Ollama) + 1 rule-based${c.reset}`);
   console.log(
     `  ${c.dim}Note:   First call is slower (model loading)${c.reset}\n`,
   );
@@ -139,14 +137,6 @@ async function main() {
       `steps=[${p.orchestration?.workflow_steps.join(", ")}]`,
       p.orchestration?.confidence ?? 0,
       p.orchestration?.latency_ms ?? 0,
-    );
-
-    // Execution
-    layerLine(
-      "Execution",
-      `tools=[${p.execution?.tool_results.map((t) => `${t.tool}✓`).join(", ")}]`,
-      p.execution?.confidence ?? 0,
-      p.execution?.latency_ms ?? 0,
     );
 
     // Generation

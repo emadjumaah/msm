@@ -47,21 +47,6 @@ layers:
     dataset: "retail-workflows-v1"
     endpoint: "http://localhost:8003/orchestrate"
 
-  execution:
-    provider: http
-    model: "functionary-small-v3"
-    version: "1.1"
-    fine_tuned: false
-    endpoint: "http://localhost:8004/execute"
-    tools:
-      - product_catalog_api
-      - inventory_api
-      - cart_api
-      - payment_api
-      - shipping_api
-      - returns_api
-      - recommendations_engine
-
   generation:
     provider: http
     model: "qwen2.5-0.5b-retail"

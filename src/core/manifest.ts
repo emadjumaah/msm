@@ -35,8 +35,6 @@ const HOOK_POINTS = [
   "after:classification",
   "before:orchestration",
   "after:orchestration",
-  "before:execution",
-  "after:execution",
   "before:generation",
   "after:generation",
   "before:validation",
@@ -76,7 +74,6 @@ const ManifestSchema = z
         translation: TranslationLayerConfigSchema,
         classification: StandardLayerConfigSchema,
         orchestration: OrchestrationLayerConfigSchema,
-        execution: StandardLayerConfigSchema,
         generation: StandardLayerConfigSchema,
         validation: StandardLayerConfigSchema,
       })

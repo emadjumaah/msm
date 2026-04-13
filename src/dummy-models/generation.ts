@@ -13,7 +13,7 @@ import type {
 
 const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
   place_order: (p) => {
-    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const toolResults = p.input.tool_results ?? [];
     const order = toolResults.find((r) => r.tool === "order_api");
     const restaurant = toolResults.find((r) => r.tool === "restaurant_api");
     const orderId =
@@ -26,7 +26,7 @@ const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
   },
 
   track_order: (p) => {
-    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const toolResults = p.input.tool_results ?? [];
     const delivery = toolResults.find((r) => r.tool === "delivery_api");
     const eta =
       (delivery?.result as Record<string, unknown>)?.eta_minutes ?? "unknown";
@@ -39,7 +39,7 @@ const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
     "Your order has been cancelled. A full refund will be processed.",
 
   inquiry: (p) => {
-    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const toolResults = p.input.tool_results ?? [];
     const kb = toolResults.find((r) => r.tool === "knowledge_api");
     return (
       ((kb?.result as Record<string, unknown>)?.answer as string) ??
@@ -48,7 +48,7 @@ const TEMPLATES: Record<string, (payload: MSMPayload) => string> = {
   },
 
   complaint: (p) => {
-    const toolResults = p.input.tool_results ?? p.execution?.tool_results ?? [];
+    const toolResults = p.input.tool_results ?? [];
     const ticket = toolResults.find((r) => r.tool === "support_api");
     const ticketId =
       (ticket?.result as Record<string, unknown>)?.ticket_id ?? "TKT-0000";

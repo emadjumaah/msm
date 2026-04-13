@@ -46,20 +46,6 @@ layers:
     dataset: "banking-workflows-v1"
     endpoint: "http://localhost:8003/orchestrate"
 
-  execution:
-    provider: http
-    model: "functionary-small-v3"
-    version: "1.1"
-    fine_tuned: false
-    endpoint: "http://localhost:8004/execute"
-    tools:
-      - core_banking_api
-      - card_management_api
-      - transfer_api
-      - bill_pay_api
-      - loan_calculator
-      - kyc_service
-
   generation:
     provider: http
     model: "qwen2.5-0.5b-banking"
@@ -92,7 +78,7 @@ hooks:
     provider: http
     model: "kyc-checker-v1"
     version: "1.0"
-    point: "before:execution"
+    point: "before:generation"
     endpoint: "http://localhost:8011/kyc-verify"
     fine_tuned: true
     dataset: "gulf-kyc-regulations-v2"
@@ -101,5 +87,16 @@ hooks:
     provider: http
     model: "limit-checker-v1"
     version: "1.0"
-    point: "before:execution"
+    point: "before:generation"
     endpoint: "http://localhost:8012/limit-check"
+    fine_tuned: true
+    dataset: "gulf-transaction-limits-v1"
+
+  aml_screening:
+    provider: http
+    model: "aml-screener-v2"
+    version: "1.0"
+    point: "after:orchestration"
+    endpoint: "http://localhost:8013/aml-screen"
+    fine_tuned: true
+    dataset: "aml-watchlists-gcc-v3"

@@ -181,7 +181,6 @@ describe("getDefaultRegistry", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ];
@@ -216,8 +215,8 @@ describe("createPipeline", () => {
     });
 
     expect(trace.payload.final_output).toBeDefined();
-    // 6 core layers + 1 outbound translation for Arabic input
-    expect(trace.entries).toHaveLength(7);
+    // 5 core layers + 1 outbound translation for Arabic input
+    expect(trace.entries).toHaveLength(6);
     expect(trace.entries.every((e) => e.status === "ok")).toBe(true);
     // Verify outbound translation was performed
     expect(trace.payload.outbound_translation).toBeDefined();
@@ -249,12 +248,6 @@ describe("createPipeline", () => {
           version: "1.0.0",
           fine_tuned: false,
         },
-        execution: {
-          provider: "dummy",
-          model: "dummy-execution-v1",
-          version: "1.0.0",
-          fine_tuned: false,
-        },
         generation: {
           provider: "dummy",
           model: "dummy-generation-v1",
@@ -274,7 +267,7 @@ describe("createPipeline", () => {
     const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
     expect(trace.payload.final_output).toBeDefined();
-    expect(trace.entries).toHaveLength(6);
+    expect(trace.entries).toHaveLength(5);
   });
 
   it("allows custom registry with custom provider", async () => {
@@ -285,7 +278,6 @@ describe("createPipeline", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ] as const;
@@ -323,12 +315,6 @@ describe("createPipeline", () => {
           fine_tuned: false,
         },
         orchestration: {
-          provider: "mock",
-          model: "mock",
-          version: "1.0",
-          fine_tuned: false,
-        },
-        execution: {
           provider: "mock",
           model: "mock",
           version: "1.0",

@@ -24,12 +24,6 @@ layers:
     version: "1.0.0"
     fine_tuned: false
 
-  execution:
-    provider: dummy
-    model: "dummy-execution-v1"
-    version: "1.0.0"
-    fine_tuned: false
-
   generation:
     provider: dummy
     model: "dummy-generation-v1"

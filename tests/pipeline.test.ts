@@ -4,7 +4,6 @@ import {
   DummyTranslationLayer,
   DummyClassificationLayer,
   DummyOrchestrationLayer,
-  DummyExecutionLayer,
   DummyGenerationLayer,
   DummyValidationLayer,
 } from "../src/dummy-models/index.js";
@@ -14,7 +13,6 @@ import type {
   ValidationOutput,
   GenerationOutput,
   OrchestrationOutput,
-  ExecutionOutput,
   OrchestrationAction,
   MSMHook,
   HookOutput,
@@ -26,7 +24,6 @@ function buildPipeline() {
   pipeline.register(new DummyTranslationLayer());
   pipeline.register(new DummyClassificationLayer());
   pipeline.register(new DummyOrchestrationLayer());
-  pipeline.register(new DummyExecutionLayer());
   pipeline.register(new DummyGenerationLayer());
   pipeline.register(new DummyValidationLayer());
   return pipeline;
@@ -35,15 +32,14 @@ function buildPipeline() {
 // ─── Pipeline ────────────────────────────────────────────────
 
 describe("Pipeline", () => {
-  it("runs all 6 layers for a greeting (action=respond)", async () => {
+  it("runs all 5 layers for a greeting (action=respond)", async () => {
     const pipeline = buildPipeline();
     const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
-    expect(trace.entries).toHaveLength(6);
+    expect(trace.entries).toHaveLength(5);
     expect(trace.payload.translation).toBeDefined();
     expect(trace.payload.classification).toBeDefined();
     expect(trace.payload.orchestration).toBeDefined();
-    expect(trace.payload.execution).toBeDefined();
     expect(trace.payload.generation).toBeDefined();
     expect(trace.payload.validation).toBeDefined();
     expect(trace.payload.final_output).toBeDefined();
@@ -234,22 +230,8 @@ describe("Orchestration Layer", () => {
 
     // With tool_results, orchestration should say "respond"
     expect(trace.payload.orchestration?.action).toBe("respond");
-    // Pipeline should proceed through all 6 layers
-    expect(trace.entries).toHaveLength(6);
-  });
-});
-
-// ─── Execution Layer ─────────────────────────────────────────
-
-describe("Execution Layer", () => {
-  it("returns tool results for each selected tool (greeting path)", async () => {
-    const pipeline = buildPipeline();
-    // greeting → respond → full pipeline including execution
-    const trace = await pipeline.run({ raw: "hello", modality: "text" });
-
-    // greeting has no tools, so execution returns empty results
-    expect(trace.payload.execution).toBeDefined();
-    expect(trace.payload.execution?.tool_results).toBeDefined();
+    // Pipeline should proceed through all 5 layers
+    expect(trace.entries).toHaveLength(5);
   });
 });
 
@@ -290,7 +272,6 @@ describe("Payload Accumulation", () => {
     expect(p.translation?.model_id).toBeTruthy();
     expect(p.classification?.model_id).toBeTruthy();
     expect(p.orchestration?.model_id).toBeTruthy();
-    expect(p.execution?.model_id).toBeTruthy();
     expect(p.generation?.model_id).toBeTruthy();
     expect(p.validation?.model_id).toBeTruthy();
 
@@ -310,7 +291,6 @@ describe("Payload Accumulation", () => {
     expect(p.classification?.model_id).toBeTruthy();
     expect(p.orchestration?.model_id).toBeTruthy();
     // Skipped
-    expect(p.execution).toBeUndefined();
     expect(p.generation).toBeUndefined();
     expect(p.validation).toBeUndefined();
     // action_required
@@ -353,14 +333,13 @@ describe("Graceful Degradation", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
     const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
-    // Pipeline should still complete — 6 entries (translate, classify-fallback, orchestrate, exec, gen, val)
-    expect(trace.entries).toHaveLength(6);
+    // Pipeline should still complete — 5 entries (translate, classify-fallback, orchestrate, gen, val)
+    expect(trace.entries).toHaveLength(5);
     const classEntry = trace.entries.find((e) => e.layer === "classification");
     expect(classEntry?.status).toBe("failed");
     expect(classEntry?.error).toContain("not registered");
@@ -381,7 +360,7 @@ describe("Graceful Degradation", () => {
     const trace = await pipeline.run({ raw: "order food", modality: "text" });
 
     // Orchestration fallback has action="respond" → full pipeline
-    expect(trace.entries).toHaveLength(6);
+    expect(trace.entries).toHaveLength(5);
     const orchEntry = trace.entries.find((e) => e.layer === "orchestration");
     expect(orchEntry?.status).toBe("failed");
     expect(orchEntry?.error).toContain("model server down");
@@ -447,7 +426,6 @@ describe("Validation Gate", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
 
     // Custom generation that counts calls
     const countingGen: MSMLayer<GenerationOutput> = {
@@ -628,8 +606,8 @@ describe("Outbound Translation", () => {
     // Arabic greeting → respond → full pipeline → outbound translation
     const trace = await pipeline.run({ raw: "مرحبا", modality: "text" });
 
-    // 6 core + 1 outbound translation = 7
-    expect(trace.entries).toHaveLength(7);
+    // 5 core + 1 outbound translation = 6
+    expect(trace.entries).toHaveLength(6);
     expect(trace.payload.outbound_translation).toBeDefined();
     expect(trace.payload.outbound_translation?.layer_invoked).toBe(true);
     expect(trace.payload.outbound_translation?.target_language).toBe("ar-gulf");
@@ -644,8 +622,8 @@ describe("Outbound Translation", () => {
     const pipeline = buildPipeline();
     const trace = await pipeline.run({ raw: "hello", modality: "text" });
 
-    // 6 entries, no outbound translation
-    expect(trace.entries).toHaveLength(6);
+    // 5 entries, no outbound translation
+    expect(trace.entries).toHaveLength(5);
     expect(trace.payload.outbound_translation).toBeUndefined();
   });
 
@@ -684,7 +662,6 @@ describe("Typed Fallbacks", () => {
     pipeline.register(new DummyTranslationLayer());
     // Skip classification
     pipeline.register(new DummyOrchestrationLayer());
-    pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
@@ -860,7 +837,6 @@ describe("Retry Feedback", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
 
     const spyGen: MSMLayer<GenerationOutput> = {
       name: "generation",
@@ -943,7 +919,6 @@ describe("Pipeline Status", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
@@ -1082,7 +1057,6 @@ describe("Pipeline Status: failed", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
     // no generation layer
     pipeline.register(new DummyValidationLayer());
 
@@ -1130,7 +1104,6 @@ describe("TraceEntry retry_attempt", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register({
       name: "validation",
@@ -1224,7 +1197,6 @@ describe("AbortSignal", () => {
     pipeline.register(new DummyTranslationLayer());
     pipeline.register(new DummyClassificationLayer());
     pipeline.register(new DummyOrchestrationLayer());
-    pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
@@ -1242,7 +1214,6 @@ describe("AbortSignal", () => {
       "translation",
       "classification",
       "orchestration",
-      "execution",
       "generation",
       "validation",
     ] as const) {
@@ -1382,7 +1353,6 @@ describe("Agent Loop Pattern", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 
@@ -1419,7 +1389,6 @@ describe("Agent Loop Pattern", () => {
         };
       },
     });
-    pipeline.register(new DummyExecutionLayer());
     pipeline.register(new DummyGenerationLayer());
     pipeline.register(new DummyValidationLayer());
 

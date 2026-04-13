@@ -48,17 +48,18 @@ This specification defines the layer contracts, internal communication format, m
 
 Large Language Models contain the accumulated knowledge of human civilization. They can write poetry, solve calculus, and discuss ancient philosophy. For a food ordering system in Doha, this is enormous waste.
 
-A commercial AI system for Arabic-language commerce needs to master exactly seven things:
+A commercial AI system for Arabic-language commerce needs to master exactly six things:
 
 - Understand what the user wants — **intent**
 - Plan the steps to fulfil that intent — **workflow**
-- Call the right tools in the right order — **execution**
 - Maintain session context — **state**
 - Understand Arabic and English including code-switching — **language**
 - Generate a natural, on-brand reply — **generation**
 - Verify the output before sending — **validation**
 
-A 200B parameter LLM solves all seven poorly and expensively. Seven specialized small models solve each one excellently and cheaply.
+A 200B parameter LLM solves all six poorly and expensively. Five specialized small models solve each one excellently and cheaply.
+
+> **Note:** Tool execution (calling APIs, running functions) is intentionally **not** a layer. MSM is a brain — it decides what to do, plans the steps, and generates the response. The external agent loop handles actual execution. This keeps the pipeline pure and deterministic.
 
 ### 2.2 The Language Problem
 
@@ -100,11 +101,11 @@ By routing all non-English input through a dedicated translation model before an
 
 ## 3. Architecture Overview
 
-An MSM system is a sequential pipeline of six standard layers. Each layer receives a structured payload, performs its specialized task, appends its output to the payload, and passes it to the next layer.
+An MSM system is a sequential pipeline of five standard layers. Each layer receives a structured payload, performs its specialized task, appends its output to the payload, and passes it to the next layer.
 
 > **Design Principle:** One layer, one job. A layer that does two things should be two layers.
 
-### 3.1 The Six Core Layers
+### 3.1 The Five Core Layers
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -135,23 +136,15 @@ An MSM system is a sequential pipeline of six standard layers. Each layer receiv
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 4 · Execution Layer                                  │
-│  Model: Functionary Small v3 · Size: 1.8B                  │
-│  Job:   Execute tool calls, handle responses and errors     │
-│  In:    Workflow steps + tool specifications                │
-│  Out:   Tool results + execution status + error log         │
-└─────────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────────┐
-│  Layer 5 · Generation Layer                                 │
+│  Layer 4 · Generation Layer                                 │
 │  Model: Qwen 2.5 0.5B · Size: 500M                         │
-│  Job:   Compose natural English response from tool results  │
-│  In:    Tool results + original intent + brand voice config │
+│  Job:   Compose natural English response from workflow plan │
+│  In:    Workflow steps + original intent + brand voice config│
 │  Out:   English response text + tone metadata               │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 6 · Validation Layer                                 │
+│  Layer 5 · Validation Layer                                 │
 │  Model: MiniCheck + DeBERTa-v3 · Size: 400M                │
 │  Job:   Verify factual consistency, policy, quality, safety │
 │  In:    Generated response + intent + policy config         │
@@ -174,11 +167,9 @@ User Input (Arabic/English/mixed)
       ↓
 [L3] Orchestration      →  Workflow Steps + Tool Selection
       ↓
-[L4] Execution          →  Tool Results
+[L4] Generation         →  English Response
       ↓
-[L5] Generation         →  English Response
-      ↓
-[L6] Validation         →  Quality Gate
+[L5] Validation         →  Quality Gate
       ↓
 [L1] Translation        →  Response in User's Language
       ↓
@@ -219,11 +210,10 @@ Layer               Model                   Parameters
 Translation         NLLB-200 distilled      600M
 Classification      mDeBERTa + CAMeL        450M
 Orchestration       Qwen 2.5 3B             3,000M
-Execution           Functionary Small v3    1,800M
 Generation          Qwen 2.5 0.5B           500M
 Validation          MiniCheck + DeBERTa     400M
 ─────────────────────────────────────────────────────
-Total                                       ~6.75B
+Total                                       ~4.95B
 ─────────────────────────────────────────────────────
 Hardware:   Single A100 (80GB) or 2x A10G
 Latency:    Under 1 second end-to-end
@@ -265,7 +255,6 @@ Every layer output block must include:
 | Translation    | `translated_text`, `source_language`, `target_language`, `confidence`, `mode`, `context_annotations?` |
 | Classification | `intent`, `domain`, `urgency`, `confidence`, `routing_target`                                         |
 | Orchestration  | `workflow_steps[]`, `tool_selections[]`, `estimated_steps`, `mode`                                    |
-| Execution      | `tool_results[]`, `execution_status`, `errors[]`                                                      |
 | Generation     | `response_text`, `tone`, `word_count`                                                                 |
 | Validation     | `passed`, `quality_score`, `policy_violations[]`, `action`                                            |
 
@@ -284,7 +273,6 @@ Each layer has a typed fallback that preserves the downstream contract:
 | Translation    | `translated_text: null`, `source_language: "unknown"`, `mode: "native"` |
 | Classification | `intent: "unknown"`, `domain: "general"`, `urgency: "normal"`           |
 | Orchestration  | `workflow_steps: ["fallback_response"]`, `tool_selections: []`          |
-| Execution      | `tool_results: []`, `execution_status: "failed"`, `errors: [msg]`       |
 | Generation     | `response_text: <fallback message>`, `tone: "neutral"`                  |
 | Validation     | `passed: true`, `action: "release"` (don't block on validator failure)  |
 
@@ -367,31 +355,6 @@ All layers communicate via a single JSON payload that accumulates results as it 
     "estimated_steps": 4,
     "model_id": "qwen2.5-3b-msm",
     "latency_ms": 190,
-    "status": "ok"
-  },
-
-  "execution": {
-    "tool_results": [
-      {
-        "tool": "location_api",
-        "status": "ok",
-        "result": { "lat": 25.28, "lng": 51.52 }
-      },
-      {
-        "tool": "restaurant_api",
-        "status": "ok",
-        "result": { "name": "Burger House", "eta": 30 }
-      },
-      {
-        "tool": "order_api",
-        "status": "ok",
-        "result": { "order_id": "ORD-9921" }
-      }
-    ],
-    "execution_status": "ok",
-    "errors": [],
-    "model_id": "functionary-small-v3",
-    "latency_ms": 310,
     "status": "ok"
   },
 
@@ -485,13 +448,6 @@ layers:
     fine_tuned: true
     dataset: "food-workflows-v5"
 
-  execution:
-    provider: "dummy" # no real model yet — use dummy
-    model: "functionary-small-v3"
-    version: "1.1"
-    fine_tuned: false
-    tools: ["maps_api", "restaurant_api", "order_api", "payment_api"]
-
   generation:
     provider: "ollama"
     model: "qwen2.5-0.5b"
@@ -532,17 +488,16 @@ Custom providers can be registered at runtime via the Layer Registry (see Sectio
 
 ## 7. Hooks
 
-Hooks extend the pipeline for domain-specific needs without changing core layers. A hook runs at a specific **hook point** — before or after any of the six core layers — and appends its output to the `payload.hooks` map.
+Hooks extend the pipeline for domain-specific needs without changing core layers. A hook runs at a specific **hook point** — before or after any of the five core layers — and appends its output to the `payload.hooks` map.
 
 ### 7.1 Hook Points
 
-Twelve hook points are available:
+Ten hook points are available:
 
 ```
 before:translation    after:translation
 before:classification after:classification
 before:orchestration  after:orchestration
-before:execution      after:execution
 before:generation     after:generation
 before:validation     after:validation
 ```
@@ -613,7 +568,7 @@ hooks:
     point: "after:generation" # verify drug safety before validation
 ```
 
-This adds medical capabilities without modifying any of the six core layers.
+This adds medical capabilities without modifying any of the five core layers.
 
 ---
 
@@ -668,10 +623,10 @@ This is the "manifest as docker-compose" model: declare what you want, the regis
 
 | Provider | Layers                                                 | Description            |
 | -------- | ------------------------------------------------------ | ---------------------- |
-| `dummy`  | All 6                                                  | In-memory dummy models |
+| `dummy`  | All 5                                                  | In-memory dummy models |
 | `ollama` | Translation, Classification, Orchestration, Generation | Real models via Ollama |
 
-Execution and Validation use `dummy` provider by default since they require domain-specific tool integrations.
+Validation uses `dummy` provider by default since it requires domain-specific policy integrations.
 
 ---
 
@@ -699,11 +654,11 @@ These are the best available starting points for each layer as of 2026. Any mode
 
 The Orchestration layer plans workflow steps and selects tools. It supports three resolution modes:
 
-| Mode     | Description                                                        | Best For                         |
-| -------- | ------------------------------------------------------------------ | -------------------------------- |
+| Mode     | Description                                                         | Best For                         |
+| -------- | ------------------------------------------------------------------- | -------------------------------- |
 | `rules`  | Deterministic workflow lookup by intent. Fastest, most predictable. | Known domains with fixed intents |
-| `llm`    | LLM-planned workflows. Flexible but less deterministic.            | Open-ended or novel intents      |
-| `hybrid` | Rules first, LLM fallback when no rule matches.                    | Production systems (recommended) |
+| `llm`    | LLM-planned workflows. Flexible but less deterministic.             | Open-ended or novel intents      |
+| `hybrid` | Rules first, LLM fallback when no rule matches.                     | Production systems (recommended) |
 
 Set `orchestration_mode` in the manifest to control this:
 
@@ -711,7 +666,7 @@ Set `orchestration_mode` in the manifest to control this:
 orchestration:
   provider: ollama
   model: "qwen2.5:3b"
-  orchestration_mode: hybrid   # rules | llm | hybrid
+  orchestration_mode: hybrid # rules | llm | hybrid
 ```
 
 | Model             | Size | Notes                                                                                |
@@ -721,15 +676,7 @@ orchestration:
 | Gemma 2 2B        | 2B   | More efficient, slightly weaker reasoning                                            |
 | Llama 3.2 3B      | 3B   | Large community, good instruction following                                          |
 
-### Layer 4 — Execution
-
-| Model                      | Size | Notes                                                                         |
-| -------------------------- | ---- | ----------------------------------------------------------------------------- |
-| **Functionary Small v3** ✓ | 1.8B | Purpose-built for function calling. Best structured JSON output at this size. |
-| Qwen 2.5 1.5B              | 1.5B | Consistent with Qwen family, good fallback                                    |
-| ToolLlama                  | 7B   | Quality ceiling reference — too large for this slot                           |
-
-### Layer 5 — Generation
+### Layer 4 — Generation
 
 | Model               | Size | Notes                                                                              |
 | ------------------- | ---- | ---------------------------------------------------------------------------------- |
@@ -737,7 +684,7 @@ orchestration:
 | SmolLM2 360M        | 360M | Extremely small, good fluency for simple responses                                 |
 | Phi-1.5             | 1.3B | Higher quality output, slightly larger                                             |
 
-### Layer 6 — Validation
+### Layer 5 — Validation
 
 | Model                        | Size       | Notes                                                               |
 | ---------------------------- | ---------- | ------------------------------------------------------------------- |
@@ -751,7 +698,6 @@ Qwen 2.5 covers three layer slots with a consistent model family:
 
 ```
 Qwen 2.5 0.5B  →  Generation Layer
-Qwen 2.5 1.5B  →  Execution Layer (backup)
 Qwen 2.5 3B    →  Orchestration Layer
 Qwen 2.5 7B    →  Teacher model for distillation
 ```
@@ -789,7 +735,6 @@ Dummy SMs do NOT prove:
 | Translation    | Simple word-list substitution, returns input with basic swaps | < 50M |
 | Classification | Returns a random valid intent from a fixed list               | < 10M |
 | Orchestration  | Returns a hardcoded 3-step workflow for any input             | < 10M |
-| Execution      | Mocks all tool calls with synthetic responses                 | < 10M |
 | Generation     | Returns a template string with slot-filled values             | < 50M |
 | Validation     | Always returns passed=true, quality_score=0.80                | < 10M |
 
@@ -801,9 +746,8 @@ Input:  "ابي اطلب برغر وبيبسي"
 [L1] Translation dummy:    "I want something and something"       [conf: 0.60]
 [L2] Classification dummy: intent=place_order, domain=food        [conf: 0.70]
 [L3] Orchestration dummy:  steps=[step_1, step_2, step_3]        [conf: 0.70]
-[L4] Execution dummy:      tools=[api_1✓, api_2✓]               [conf: 0.70]
-[L5] Generation dummy:     "Your request has been processed."    [conf: 0.70]
-[L6] Validation dummy:     passed=true, score=0.80
+[L4] Generation dummy:     "Your request has been processed."    [conf: 0.70]
+[L5] Validation dummy:     passed=true, score=0.80
 [L1] Translation dummy:    "تم معالجة طلبك."                    [conf: 0.60]
 
 Full trace: ✓ captured
@@ -862,7 +806,6 @@ Changing the Translation Layer model:
   ✓ Translation Layer  — updated
   ✗ Classification     — unchanged
   ✗ Orchestration      — unchanged
-  ✗ Execution          — unchanged
   ✗ Generation         — unchanged
   ✗ Validation         — unchanged
 ```
@@ -882,7 +825,6 @@ Each layer is evaluated independently using its own benchmark. The overall syste
 | Translation    | BLEU score on Gulf Arabic commerce test set    | > 0.72    |
 | Classification | F1 score on intent classification benchmark    | > 0.90    |
 | Orchestration  | Workflow accuracy on golden trace set          | > 0.85    |
-| Execution      | Tool call success rate                         | > 0.95    |
 | Generation     | Human preference score vs baseline             | > 0.80    |
 | Validation     | False positive rate (blocking valid responses) | < 0.02    |
 
@@ -990,7 +932,7 @@ msm/
 │   │   ├── registry.ts       — LayerRegistry & createPipeline
 │   │   ├── manifest.ts       — Zod schema & YAML loader
 │   │   └── http-layer.ts     — abstract HTTP-backed layer base
-│   ├── dummy-models/         — 6 dummy layer implementations
+│   ├── dummy-models/         — 5 dummy layer implementations
 │   ├── ollama-layers/        — Ollama-backed layers (translation, classification, orchestration, generation)
 │   ├── server.ts             — HTTP REST API server
 │   ├── demo.ts               — CLI demo runner
@@ -1016,14 +958,14 @@ msm/
 ### Milestone 1 — The Standard ✅
 
 - ✅ Spec document published and open sourced
-- ✅ Layer contracts finalized (6 layers + hooks)
+- ✅ Layer contracts finalized (5 layers + hooks)
 - ✅ Manifest schema finalized (with `provider` field and `hooks` section)
 - ✅ GitHub repository live — https://github.com/emadjumaah/msm
 
 ### Milestone 2 — The Runtime ✅
 
 - ✅ Pipeline engine running (with trace, graceful degradation, validation gate, hooks)
-- ✅ All six dummy models implemented
+- ✅ All five dummy models implemented
 - ✅ Full trace system working
 - ✅ Layer Registry & `createPipeline()` — manifest-driven pipeline creation
 - ✅ 51 tests across 4 suites (pipeline, manifest, registry, hooks)

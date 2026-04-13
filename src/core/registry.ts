@@ -134,11 +134,6 @@ export async function getDefaultRegistry(): Promise<LayerRegistry> {
     () => new dummy.DummyOrchestrationLayer(),
   );
   registry.register(
-    "execution",
-    "dummy",
-    () => new dummy.DummyExecutionLayer(),
-  );
-  registry.register(
     "generation",
     "dummy",
     () => new dummy.DummyGenerationLayer(),
@@ -166,11 +161,6 @@ export async function getDefaultRegistry(): Promise<LayerRegistry> {
     "orchestration",
     "ollama",
     (c) => new ollama.OllamaOrchestrationLayer(c.model),
-  );
-  registry.register(
-    "execution",
-    "ollama",
-    () => new dummy.DummyExecutionLayer(), // Execution is tool-calling, not LLM — intentionally uses dummy
   );
   registry.register(
     "generation",
@@ -227,7 +217,6 @@ export async function createPipeline(
     "translation",
     "classification",
     "orchestration",
-    "execution",
     "generation",
     "validation",
   ];
